@@ -1595,7 +1595,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "com.uitgwilliams.g3code",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1618,7 +1618,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.com.uitgwilliams.g3code</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1778,7 +1778,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         );
 
       const onWindows = yield* signedWinConfig("win32");
-      assert.equal((onWindows.azureSignOptions as Record<string, unknown>).publisherName, "T3");
+      assert.equal((onWindows.azureSignOptions as Record<string, unknown>).publisherName, "G3");
       assert.notProperty(onWindows, "signtoolOptions");
 
       const onLinux = yield* signedWinConfig("linux");
@@ -1786,13 +1786,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const signtoolOptions = onLinux.signtoolOptions as Record<string, unknown>;
       assert.match(signtoolOptions.sign as string, /scripts[\\/]lib[\\/]windows-jsign\.ts$/);
       assert.deepStrictEqual(signtoolOptions.signingHashAlgorithms, ["sha256"]);
-      assert.deepStrictEqual(signtoolOptions.publisherName, ["T3"]);
+      assert.deepStrictEqual(signtoolOptions.publisherName, ["G3"]);
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(
           ConfigProvider.fromEnv({
             env: {
-              AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "T3",
+              AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "G3",
               AZURE_TRUSTED_SIGNING_ENDPOINT: "https://eus.codesigning.azure.net/",
               AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "profile",
               AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "account",
@@ -1963,7 +1963,7 @@ it.effect("preserves packaged app directories from the dir target", () =>
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-dir-artifact-" });
     const stage = path.join(root, "stage");
     const output = path.join(root, "output");
-    const app = path.join("mac-arm64", "T3 Code.app", "Contents");
+    const app = path.join("mac-arm64", "G3 Code.app", "Contents");
     yield* fs.makeDirectory(path.join(stage, app), { recursive: true });
     yield* fs.writeFileString(path.join(stage, app, "Info.plist"), "built-app");
     yield* fs.writeFileString(path.join(stage, "builder-debug.yml"), "debug");
@@ -1993,7 +1993,7 @@ it.effect.skipIf(!symlinksSupported)("preserves relative links when replacing di
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-dir-artifact-links-" });
     const stage = path.join(root, "stage");
     const output = path.join(root, "output");
-    const app = path.join("mac-arm64", "T3 Code.app", "Contents");
+    const app = path.join("mac-arm64", "G3 Code.app", "Contents");
     yield* fs.makeDirectory(path.join(stage, app), { recursive: true });
     yield* fs.writeFileString(path.join(stage, app, "Info.plist"), "built-app");
     yield* fs.symlink("Info.plist", path.join(stage, app, "Current"));

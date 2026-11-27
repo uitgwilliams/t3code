@@ -137,6 +137,7 @@ describe("DesktopSettings", () => {
           yield* settings.setWslBackendEnabled(true);
           yield* settings.setWslDistro("Ubuntu");
           yield* settings.setServerExposureMode("network-accessible");
+          yield* settings.setLocalEnvironmentEnabled(true);
           const before = yield* settings.get;
           assert.isTrue((yield* settings.setLocalEnvironmentEnabled(false)).changed);
           assert.deepEqual(yield* settings.load, { ...before, localEnvironmentEnabled: false });
@@ -156,7 +157,10 @@ describe("DesktopSettings", () => {
         yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
         yield* fileSystem.writeFileString(environment.desktopSettingsPath, "{not-json");
 
-        assert.deepEqual(yield* settings.load, DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS);
+        assert.deepEqual(yield* settings.load, {
+          ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+          localEnvironmentEnabled: false,
+        });
       }),
     ),
   );
@@ -224,7 +228,7 @@ describe("DesktopSettings", () => {
 
         assert.deepEqual(yield* settings.load, {
           linuxPasswordStore: "auto",
-          localEnvironmentEnabled: true,
+          localEnvironmentEnabled: false,
           mainWindowBounds: { x: 120, y: 80, width: 1280, height: 900 },
           mainWindowMaximized: false,
           serverExposureMode: "network-accessible",
@@ -254,10 +258,7 @@ describe("DesktopSettings", () => {
 
         assert.isFalse((yield* settings.load).localEnvironmentEnabled);
         yield* settings.setMainWindowBounds({ x: 10, y: 20, width: 800, height: 600 }, false);
-        assert.include(
-          yield* fileSystem.readFileString(environment.desktopSettingsPath),
-          `"localEnvironmentEnabled":false`,
-        );
+        assert.isFalse((yield* settings.load).localEnvironmentEnabled);
       }),
     ),
   );
@@ -377,7 +378,7 @@ describe("DesktopSettings", () => {
 
         assert.deepEqual(yield* settings.load, {
           linuxPasswordStore: "auto",
-          localEnvironmentEnabled: true,
+          localEnvironmentEnabled: false,
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
@@ -406,7 +407,7 @@ describe("DesktopSettings", () => {
 
         assert.deepEqual(yield* settings.load, {
           linuxPasswordStore: "auto",
-          localEnvironmentEnabled: true,
+          localEnvironmentEnabled: false,
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",

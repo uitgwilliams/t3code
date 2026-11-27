@@ -66,10 +66,10 @@ describe("DesktopEnvironment", () => {
         {},
         { VITE_DEV_SERVER_URL: "http://localhost:5173" },
       );
-      const production = yield* makeEnvironment();
+      const production = yield* makeEnvironment({ isPackaged: true });
 
       assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(production.stateDir, "/Users/alice/.g3/userdata");
     }),
   );
 });

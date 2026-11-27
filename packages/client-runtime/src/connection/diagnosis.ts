@@ -173,11 +173,11 @@ function steps(
   );
   switch (located.cause) {
     case "offline":
-      return [resolve(msg("Connect this device to the internet. T3 Code reconnects on its own."))];
+      return [resolve(msg("Connect this device to the internet. G3 Code reconnects on its own."))];
     case "session_pending":
       return [
-        resolve(msg("Wait a moment. T3 Code retries on its own.")),
-        resolve(msg("If it keeps waiting, reload or restart T3 Code on this device.")),
+        resolve(msg("Wait a moment. G3 Code retries on its own.")),
+        resolve(msg("If it keeps waiting, reload or restart G3 Code on this device.")),
       ];
     case "approval_pending": {
       const code =
@@ -224,10 +224,10 @@ function steps(
         ),
       ];
     case "tunnel_pending":
-      return [resolve(msg("Wait a minute. T3 Code retries on its own.")), checkHost];
+      return [resolve(msg("Wait a minute. G3 Code retries on its own.")), checkHost];
     case "relay_error":
       return [
-        resolve(msg("Wait a few minutes. T3 Code retries on its own.")),
+        resolve(msg("Wait a few minutes. G3 Code retries on its own.")),
         resolve(msg("If it keeps failing, copy the diagnostics and report it.")),
       ];
     case "tunnel_not_enabled":
@@ -239,7 +239,7 @@ function steps(
     case "released":
     case "tunnel_down":
       return [
-        resolve(msg("Make sure {host} is awake and T3 Code is running on it.", { host })),
+        resolve(msg("Make sure {host} is awake and G3 Code is running on it.", { host })),
         checkHost,
         resolve(
           msg(
@@ -264,7 +264,7 @@ function steps(
   switch (located.hop) {
     case "device":
       return [
-        resolve(msg("Restart T3 Code on this device.")),
+        resolve(msg("Restart G3 Code on this device.")),
         resolve(
           msg("If it keeps failing, remove {host} from this device and add it again.", { host }),
         ),
@@ -296,7 +296,7 @@ function steps(
             ),
           ]
         : [
-            resolve(msg("Make sure T3 Code is running on {host}.", { host })),
+            resolve(msg("Make sure G3 Code is running on {host}.", { host })),
             resolve(msg("Retry. If it keeps failing, copy the diagnostics.")),
           ];
   }
@@ -453,7 +453,7 @@ const HOP_MARK = { ok: "ok", failed: "FAILED", unchecked: "not checked" } as con
 /** One plain-text block for bug reports. */
 export function connectionDiagnosisText(hostLabel: string, diagnosis: ConnectionDiagnosis): string {
   return [
-    `T3 Code connection to ${hostLabel}: ${diagnosis.headline}`,
+    `G3 Code connection to ${hostLabel}: ${diagnosis.headline}`,
     "",
     ...diagnosis.hops.map((hop) => `${hop.label}: ${HOP_MARK[hop.result]}`),
     "",

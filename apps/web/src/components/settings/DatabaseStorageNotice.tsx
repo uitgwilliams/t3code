@@ -161,7 +161,7 @@ function ReclaimRow({
       toastManager.add({
         type: "success",
         title: gt("Reclaiming {amount} on {environment}", { amount, environment: label }),
-        description: gt("T3 Code there restarts and is back in about {minutes} min.", {
+        description: gt("G3 Code there restarts and is back in about {minutes} min.", {
           minutes,
         }),
       });
@@ -184,7 +184,7 @@ function ReclaimRow({
       title={gt("{amount} on {environment}", { amount, environment: label })}
       description={
         status.reclaimFailure === undefined
-          ? gt("Restarts T3 Code there. It will be offline for about {minutes} min.", { minutes })
+          ? gt("Restarts G3 Code there. It will be offline for about {minutes} min.", { minutes })
           : gt("The last attempt failed: {reason}", { reason: status.reclaimFailure })
       }
       control={
