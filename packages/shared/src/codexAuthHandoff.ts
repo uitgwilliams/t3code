@@ -64,8 +64,12 @@ export function codexCallbackUrl(value: string, redirectUri: string, state: stri
   return callback;
 }
 
-export function codexAuthHandoffUrl(input: CodexAuthHandoff, development = false) {
-  const url = new URL(`${development ? "t3code-dev" : "t3code"}://auth/codex`);
+export function codexAuthHandoffUrl(
+  input: CodexAuthHandoff,
+  development = false,
+  desktop: "t3code" | "g3code" = "t3code",
+) {
+  const url = new URL(`${desktop}${development ? "-dev" : ""}://auth/codex`);
   url.searchParams.set("request", encodeHandoff(input));
   return url.toString();
 }

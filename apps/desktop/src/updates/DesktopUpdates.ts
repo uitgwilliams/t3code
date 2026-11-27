@@ -345,6 +345,8 @@ function shouldBroadcastDownloadProgress(
   return nextStep !== previousStep || nextPercent === 100;
 }
 
+declare const __G3_MAC_MANUAL_UPDATES__: boolean | undefined;
+
 function getAutoUpdateDisabledReason(args: {
   policy: DesktopUpdatePolicy.UpdatePolicy;
   isDevelopment: boolean;
@@ -485,6 +487,15 @@ export const make = Effect.gen(function* () {
   );
 
   const resolveDisabledReason = Effect.gen(function* () {
+    // A verified upgrade between Developer ID signed releases is required before enabling G3 updates.
+    if (
+      environment.platform === "darwin" &&
+      environment.isPackaged &&
+      typeof __G3_MAC_MANUAL_UPDATES__ !== "undefined" &&
+      __G3_MAC_MANUAL_UPDATES__
+    ) {
+      return Option.some("Install newer G3 Code builds manually from the reviewed Mac installer.");
+    }
     const hasFeedConfig = yield* hasUpdateFeedConfig;
     return Option.fromNullishOr(
       getAutoUpdateDisabledReason({

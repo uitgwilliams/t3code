@@ -15,8 +15,8 @@ import type {
   ProviderInstanceId,
   ServerProvider,
 } from "@t3tools/contracts";
+import { isMacPlatform } from "@t3tools/shared/keybindings";
 import { codexAuthHandoffUrl } from "@t3tools/shared/codexAuthHandoff";
-import { macDesktopLinkProtocol } from "@t3tools/shared/macDesktopLinks";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { CheckIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
@@ -77,6 +77,7 @@ function readSignInRouting(environmentId: EnvironmentId) {
   const clientCallback = prefersClientCallback(local);
   const primaryEnvironmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
   const primaryAuthEnvironmentId =
+    window.desktopBridge?.getClientPlatform?.() !== "darwin" &&
     !local &&
     primaryEnvironmentId !== null &&
     appAtomRegistry.get(environmentPresentations.presentationAtom(primaryEnvironmentId))?.connection
@@ -512,8 +513,6 @@ function ManagedCodexSetup({
     setTransferFailed(false);
     setRequestedMethodId(methodId);
     const returnUrl = new URL(window.location.href);
-    if (window.desktopBridge?.getClientPlatform() === "darwin")
-      returnUrl.protocol = macDesktopLinkProtocol(returnUrl.protocol);
     if (returnUrl.pathname === "/welcome") returnUrl.hash = `agents:${environmentId}`;
     if (returnUrl.pathname === "/settings/providers")
       returnUrl.searchParams.set("instanceId", instanceId);
@@ -554,7 +553,11 @@ function ManagedCodexSetup({
           input: {
             instanceId,
             methodId,
-            returnUrl: returnUrl.toString(),
+            // Electron receives the browser callback itself. An upstream server return URL
+            // would open the main T3 app when the Mac has both clients installed.
+            ...(window.desktopBridge?.getClientPlatform?.() === "darwin" && clientCallback
+              ? {}
+              : { returnUrl: returnUrl.toString() }),
             callbackMode: clientCallback ? "client" : "server",
           },
         }),
@@ -698,6 +701,7 @@ function ManagedCodexSetup({
             flowId: auth.flowId,
           },
           import.meta.env.DEV,
+          isMacPlatform(navigator.platform) ? "g3code" : "t3code",
         )
       : null;
   const waitingControl = (

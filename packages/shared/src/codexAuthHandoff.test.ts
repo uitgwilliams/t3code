@@ -31,6 +31,14 @@ const input = {
 const callbackUrl = `http://127.0.0.1:54213/auth/callback?state=${"a".repeat(43)}&code=one-time-code&client_id=oaiapp_test`;
 
 describe("Codex desktop handoff", () => {
+  it("routes fork handoffs through G3 and retains the upstream payload checks", () => {
+    for (const development of [false, true]) {
+      const link = codexAuthHandoffUrl(input, development, "g3code");
+      const expected = development ? "g3code-dev:" : "g3code:";
+      expect(new URL(link).protocol).toBe(expected);
+      expect(readCodexAuthHandoff(link.replace(/^g3code/, "t3code"), development)).toEqual(input);
+    }
+  });
   it("keeps the hosted return route, account, and environment with the code in a fragment", () => {
     expect(readCodexAuthHandoff(codexAuthHandoffUrl(input), false)).toEqual(input);
     const delivery = codexAuthDeliveryUrl(input, callbackUrl);
