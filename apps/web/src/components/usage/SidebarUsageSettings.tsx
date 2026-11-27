@@ -51,12 +51,15 @@ export function SidebarUsageSettings({ pools }: { readonly pools: readonly Limit
             <Button
               size="xs"
               variant="ghost"
-              onClick={() =>
+              onClick={() => {
+                const prefix = `[${JSON.stringify(driver)},`;
                 setPreferences((current) => ({
                   ...current,
                   providers: current.providers.filter((provider) => provider !== driver),
-                }))
-              }
+                  pins: current.pins.filter((id) => !id.startsWith(prefix)),
+                  unpinned: current.unpinned.filter((id) => !id.startsWith(prefix)),
+                }));
+              }}
             >
               <T>Remove</T>
             </Button>
@@ -84,7 +87,7 @@ export function SidebarUsageSettings({ pools }: { readonly pools: readonly Limit
                           return {
                             ...current,
                             pins: current.pins.filter((key) => key !== id),
-                            unpinned: [...current.unpinned, id],
+                            unpinned: [...new Set([...current.unpinned, id])],
                           };
                         }
                         return {

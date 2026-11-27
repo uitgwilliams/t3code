@@ -10,5 +10,11 @@ export const Route = createFileRoute("/_chat/usage")({
 
 function UsageRoute() {
   const { refreshLimits } = Route.useSearch();
-  return <UsagePage refreshLimitsOnOpen={refreshLimits === true} />;
+  const navigate = Route.useNavigate();
+  return (
+    <UsagePage
+      refreshLimitsOnOpen={refreshLimits === true}
+      onRefreshLimitsConsumed={() => void navigate({ search: {}, replace: true })}
+    />
+  );
 }

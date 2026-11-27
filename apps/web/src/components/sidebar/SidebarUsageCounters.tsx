@@ -31,6 +31,8 @@ import {
   useSidebarUsagePreferences,
 } from "../usage/sidebarUsagePreferences";
 
+const DRAG_MODIFIERS = [restrictToHorizontalAxis];
+
 function Counter({
   counter,
   spent,
@@ -42,7 +44,7 @@ function Counter({
 }) {
   const gt = useGT();
   const locale = useLocale();
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: counter.id,
   });
   const provider = providerClients.get(counter.driver)?.label ?? counter.driver;
@@ -71,13 +73,17 @@ function Counter({
             {...listeners}
             aria-label={label}
             onClick={onClick}
-            style={{ transform: CSS.Translate.toString(transform), transition }}
-            className="flex h-8 w-13 shrink-0 touch-none items-center justify-center gap-1 rounded-md px-1 text-xs tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            style={{
+              transform: CSS.Translate.toString(transform),
+              transition,
+              zIndex: isDragging ? 1 : undefined,
+            }}
+            className="relative flex h-8 min-w-13 shrink-0 touch-none items-center justify-center gap-1 rounded-md px-1.5 text-xs whitespace-nowrap tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <ProviderInstanceIcon
               driverKind={counter.driver}
               displayName={provider}
-              className="pointer-events-none size-3.5 [&_path]:fill-current [&_svg]:fill-current"
+              className="pointer-events-none size-3.5 grayscale"
               iconClassName="size-3.5"
             />
             {percent}
@@ -125,11 +131,11 @@ export function SidebarUsageCounters({
 
   if (visiblePins.length === 0) return fallback;
   return (
-    <SidebarMenuItem className="min-w-0 overflow-x-auto">
+    <SidebarMenuItem className="min-w-0 flex-1 overflow-x-auto">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
-        modifiers={[restrictToHorizontalAxis]}
+        modifiers={DRAG_MODIFIERS}
         onDragEnd={({ active, over }) => {
           if (!over || active.id === over.id) return;
           setPreferences((current) => {
@@ -141,7 +147,7 @@ export function SidebarUsageCounters({
         }}
       >
         <SortableContext items={visiblePins} strategy={horizontalListSortingStrategy}>
-          <div className="flex w-max items-center gap-1">
+          <div className="flex w-max min-w-full items-center justify-evenly gap-1">
             {visiblePins.map((id) => {
               const counter = byId.get(id);
               return counter ? (

@@ -239,11 +239,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/settings" });
   };
 
-  const handleUsageClick = () => {
+  const handleUsageClick = (refreshLimits: boolean) => {
     if (isMobile) {
       setOpenMobile(false);
     }
-    void navigate({ to: "/usage", search: { refreshLimits: true } });
+    void navigate({ to: "/usage", search: refreshLimits ? { refreshLimits: true } : {} });
   };
 
   const handleBackClick = () => {
@@ -270,12 +270,12 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             onClick={handleSettingsClick}
           />
           <SidebarUsageCounters
-            onClick={handleUsageClick}
+            onClick={() => handleUsageClick(true)}
             fallback={
               <SidebarUtilityItem
                 icon={<ChartNoAxesColumnIcon />}
                 label={gt("Usage")}
-                onClick={handleUsageClick}
+                onClick={() => handleUsageClick(false)}
               />
             }
           />

@@ -69,6 +69,11 @@ it("saves the reordered usage counters and still opens Usage on click", async ()
   await expect.element(screen.getByRole("button").first()).toHaveTextContent("41%");
   expect(onClick).not.toHaveBeenCalled();
 
+  const claude = screen.getByRole("button", { name: /Claude.*Weekly.*41% remaining/ });
+  await userEvent.dragAndDrop(claude, codex, { steps: 12 });
+  await expect.element(screen.getByRole("button").first()).toHaveTextContent("68%");
+  expect(onClick).not.toHaveBeenCalled();
+
   await codex.click();
   expect(onClick).toHaveBeenCalledOnce();
 });

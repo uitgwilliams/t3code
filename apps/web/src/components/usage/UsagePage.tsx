@@ -176,14 +176,15 @@ function UsageModelDialogHost({
 
 export function UsagePage({
   refreshLimitsOnOpen = false,
+  onRefreshLimitsConsumed,
 }: {
   readonly refreshLimitsOnOpen?: boolean;
+  readonly onRefreshLimitsConsumed?: () => void;
 }) {
   const [preferences, setPreferences] = useState(() => {
     const saved = readUsagePagePreferences();
     return refreshLimitsOnOpen ? { ...saved, metric: "limits" as const } : saved;
   });
-  const forceLimitsRefresh = useRef(refreshLimitsOnOpen);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const hour12 = usePrimarySettings((settings) => resolveHour12(settings.timestampFormat));
   const gt = useGT();
@@ -306,20 +307,24 @@ export function UsagePage({
     return () => globalThis.window.removeEventListener("keydown", onUsageKeyDown, true);
   }, []);
 
-  const refreshWindow = () => {
+  const refreshCurrentLimits = () => {
     if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setIsRefreshing(true);
+    void refreshLimits()
+      .catch(() => undefined)
+      .finally(() => {
+        refreshingRef.current = false;
+        setIsRefreshing(false);
+      });
+  };
 
+  const refreshWindow = () => {
     if (showingLimits) {
-      refreshingRef.current = true;
-      setIsRefreshing(true);
-      void refreshLimits()
-        .catch(() => undefined)
-        .finally(() => {
-          refreshingRef.current = false;
-          setIsRefreshing(false);
-        });
+      refreshCurrentLimits();
       return;
     }
+    if (refreshingRef.current) return;
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     if (
       nextWindow.sinceDay !== window.sinceDay ||
@@ -347,15 +352,22 @@ export function UsagePage({
     .sort()
     .join(",");
   const autoRefreshLimits = useEffectEvent(() => {
-    const automatic = !forceLimitsRefresh.current;
-    forceLimitsRefresh.current = false;
-    if (automatic) void refreshLimits(true).catch(() => undefined);
-    else refreshWindow();
+    void refreshLimits(true).catch(() => undefined);
   });
+  const consumeLimitsRefresh = useEffectEvent(() => {
+    if (!showingLimits) selectMetric("limits");
+    refreshCurrentLimits();
+    onRefreshLimitsConsumed?.();
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- consumes the sidebar's one-shot refresh request
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- a new router request switches the tab and starts its refresh
+    if (refreshLimitsOnOpen) consumeLimitsRefresh();
+  }, [refreshLimitsOnOpen]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refreshes provider limits from the server when the connected environment set changes
   useEffect(() => {
-    if (showingLimits && connectedLimitsEnvironments) autoRefreshLimits();
-  }, [showingLimits, connectedLimitsEnvironments]);
+    if (!refreshLimitsOnOpen && showingLimits && connectedLimitsEnvironments) autoRefreshLimits();
+  }, [refreshLimitsOnOpen, showingLimits, connectedLimitsEnvironments]);
 
   const days = enumerateDays(shownWindow.sinceDay, shownWindow.untilDay);
   const hours =
