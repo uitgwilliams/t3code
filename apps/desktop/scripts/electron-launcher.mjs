@@ -15,9 +15,9 @@ const devBundleIdSuffix = NodePath.basename(repoRoot)
   .replaceAll(/[^a-z0-9]+/g, "");
 const APP_DISPLAY_NAME = isDevelopment ? "G3 Code (Dev)" : "G3 Code (Beta)";
 const APP_BUNDLE_ID = isDevelopment
-  ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
-  : "com.t3tools.t3code";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+  ? `com.uitgwilliams.g3code.dev.${devBundleIdSuffix || "local"}`
+  : "com.uitgwilliams.g3code.source";
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["g3code-dev"] : ["g3code"];
 const LAUNCHER_VERSION = 20;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,

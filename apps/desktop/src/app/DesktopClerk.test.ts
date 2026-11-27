@@ -123,7 +123,13 @@ describe("DesktopClerk", () => {
       name: "packaged macOS",
       isDevelopment: false,
       platform: "darwin" as const,
-      userData: "/tmp/app-data/t3code-v2",
+      userData: "/tmp/app-data/G3 Code",
+    },
+    {
+      name: "development macOS",
+      isDevelopment: true,
+      platform: "darwin" as const,
+      userData: "/tmp/app-data/t3code-dev",
     },
     {
       name: "packaged Linux",
@@ -171,7 +177,10 @@ describe("DesktopClerk", () => {
       assert.deepEqual(storageMock.mock.calls, [
         [{ path: NodePath.join(NodePath.resolve(clerkStateDir), "clerk") }],
       ]);
-      assert.strictEqual(createClerkBridgeMock.mock.calls[0]?.[0]?.storage, storageAdapter);
+      const options = createClerkBridgeMock.mock.calls[0]?.[0];
+      assert.strictEqual(options?.storage, storageAdapter);
+      const scheme = platform === "darwin" ? "g3code" : "t3code";
+      assert.strictEqual(options?.renderer.scheme, isDevelopment ? `${scheme}-dev` : scheme);
     },
   );
 
@@ -234,7 +243,7 @@ describe("DesktopClerk", () => {
     createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
     const listeners = new Map<string, (...args: unknown[]) => void>();
     const received: string[] = [];
-    const first = "t3code://new?prompt=first";
+    const first = "t3code-dev://new?prompt=first";
     const second = "t3code://threads/env-1/thread-1";
     const later = "t3code://new?prompt=later";
     const launchPair = "t3code://pair?pairingUrl=https%3A%2F%2Fvps.example.com%2F%23token%3Dabc";
@@ -248,16 +257,24 @@ describe("DesktopClerk", () => {
 
     return Effect.gen(function* () {
       const clerk = yield* DesktopClerk.DesktopClerk;
-      listeners.get("second-instance")?.({}, ["t3", first]);
+      listeners.get("second-instance")?.({}, ["t3", "g3code-dev://new?prompt=first"]);
       listeners.get("second-instance")?.({}, ["t3", second]);
-      listeners.get("open-url")?.({ preventDefault: () => undefined }, launchPair);
+      listeners.get("open-url")?.(
+        { preventDefault: () => undefined },
+        launchPair.replace("t3code:", "g3code-dev:"),
+      );
       assert.deepEqual(received, []);
 
       yield* clerk.configure;
       listeners.get("second-instance")!({}, ["t3", later]);
       yield* Effect.promise(() => delivered.promise);
 
-      assert.deepEqual(received, [launchPair, first, second, later]);
+      assert.deepEqual(received, [
+        launchPair.replace("t3code:", "t3code-dev:"),
+        first,
+        second,
+        later,
+      ]);
     }).pipe(
       Effect.scoped,
       Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, undefined, listeners)),
@@ -300,7 +317,7 @@ describe("DesktopClerk", () => {
 
         assert.isTrue(Exit.hasInterrupts(exit));
         assert.deepEqual(events, [
-          "setPath:userData:/tmp/app-data/t3code-v2",
+          `setPath:userData:/tmp/app-data/${platform === "darwin" ? "G3 Code" : "t3code-v2"}`,
           "requestSingleInstanceLock",
           "quit",
         ]);
@@ -345,7 +362,7 @@ it.effect(
       assert.deepEqual(loadURL.mock.calls, [
         ["t3code-dev://app/settings/providers?instanceId=work"],
       ]);
-      listeners.get("open-url")!(event, "t3code-dev://app/welcome#agents:machine-id");
+      listeners.get("open-url")!(event, "g3code-dev://app/welcome#agents:machine-id");
       assert.equal(event.preventDefault.mock.calls.length, 1);
     }).pipe(
       Effect.scoped,
@@ -470,6 +487,8 @@ it.effect("hands web and app links to the renderer and leaves other links alone"
       assert.strictEqual(open("t3code://new?prompt=hi"), 1);
       assert.strictEqual(open("t3code://threads/env-1/thread-1"), 1);
       assert.strictEqual(open(pairLink), 1);
+      assert.strictEqual(open("g3code://new?prompt=wrong-channel"), 0);
+      assert.strictEqual(open("g3code-dev://pair"), 0);
       assert.strictEqual(open("t3code://pair"), 0);
       assert.strictEqual(open("mailto:hello@example.com"), 0);
       assert.strictEqual(open("t3code://somewhere-else"), 0);

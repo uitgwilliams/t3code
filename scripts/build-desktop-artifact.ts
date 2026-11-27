@@ -2918,7 +2918,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "G3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: ["g3code"],
         },
         {
           name: "Web site URL",

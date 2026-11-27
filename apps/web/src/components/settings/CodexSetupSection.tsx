@@ -16,6 +16,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { codexAuthHandoffUrl } from "@t3tools/shared/codexAuthHandoff";
+import { macDesktopLinkProtocol } from "@t3tools/shared/macDesktopLinks";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { CheckIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
@@ -511,6 +512,8 @@ function ManagedCodexSetup({
     setTransferFailed(false);
     setRequestedMethodId(methodId);
     const returnUrl = new URL(window.location.href);
+    if (window.desktopBridge?.getClientPlatform() === "darwin")
+      returnUrl.protocol = macDesktopLinkProtocol(returnUrl.protocol);
     if (returnUrl.pathname === "/welcome") returnUrl.hash = `agents:${environmentId}`;
     if (returnUrl.pathname === "/settings/providers")
       returnUrl.searchParams.set("instanceId", instanceId);

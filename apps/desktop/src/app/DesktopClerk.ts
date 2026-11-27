@@ -14,6 +14,7 @@ import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCal
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
 import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
+import { macDesktopLaunchUrl, macDesktopLinkProtocol } from "@t3tools/shared/macDesktopLinks";
 import { readPairingAppLink } from "@t3tools/shared/remote";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
@@ -85,13 +86,13 @@ export const desktopClerkFrontendApiHostname = resolveDesktopClerkFrontendApiHos
     : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__,
 );
 
-function createDesktopClerkBridge(tokenDirectory: string, isDevelopment: boolean) {
+function createDesktopClerkBridge(tokenDirectory: string, externalScheme: string) {
   return createClerkBridge({
     storage: storage({ path: tokenDirectory }),
     manageSingleInstanceLock: false,
     passkeys: true,
     renderer: {
-      scheme: ElectronProtocol.getDesktopScheme(isDevelopment),
+      scheme: externalScheme,
       host: ElectronProtocol.DESKTOP_HOST,
     },
   });
@@ -101,6 +102,11 @@ function createDesktopClerkBridge(tokenDirectory: string, isDevelopment: boolean
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
+  const rendererProtocol = `${ElectronProtocol.getDesktopScheme(environment.isDevelopment)}:`;
+  const externalProtocol =
+    environment.platform === "darwin" ? macDesktopLinkProtocol(rendererProtocol) : rendererProtocol;
+  const readLaunchUrl = (value: string) =>
+    environment.platform === "darwin" ? macDesktopLaunchUrl(value, rendererProtocol) : value;
   const shell = yield* ElectronShell.ElectronShell;
   const path = yield* Path.Path;
 
@@ -141,7 +147,7 @@ export const make = Effect.gen(function* () {
       try: () =>
         createDesktopClerkBridge(
           path.resolve(environment.stateDir, "clerk"),
-          environment.isDevelopment,
+          externalProtocol.slice(0, -1),
         ),
       catch: (cause) =>
         new DesktopClerkBridgeInitializationError({
@@ -222,17 +228,17 @@ export const make = Effect.gen(function* () {
         return true;
       };
       const args = yield* HostProcess.Arguments;
-      args.some((value) => startProviderAuthHandoff(value) || openAppLink(value));
+      const handleLaunchArgument = (argument: string) => {
+        const value = readLaunchUrl(argument);
+        return startProviderAuthHandoff(value) || resumeProviderAuth(value) || openAppLink(value);
+      };
+      args.some(handleLaunchArgument);
       const openWebLink = (url: string) => {
         if (!DesktopWebLinks.isWebLink(url)) return false;
         void runPromise(webLinks.receive(url));
         return true;
       };
-      handleOpenUrl = (url) =>
-        startProviderAuthHandoff(url) ||
-        resumeProviderAuth(url) ||
-        openWebLink(url) ||
-        openAppLink(url);
+      handleOpenUrl = (url) => handleLaunchArgument(url) || openWebLink(url);
       for (const url of pendingOpenUrls.splice(0)) handleOpenUrl(url);
       yield* electronApp.on("open-file", (event: { preventDefault: () => void }, path: string) => {
         if (!DesktopWebLinks.isWebPageFile(path)) return;
@@ -240,13 +246,7 @@ export const make = Effect.gen(function* () {
         void runPromise(webLinks.receive(NodeURL.pathToFileURL(path).href));
       });
       handleSecondInstance = (argv) => {
-        if (
-          argv?.some(
-            (value) =>
-              startProviderAuthHandoff(value) || resumeProviderAuth(value) || openAppLink(value),
-          )
-        )
-          return;
+        if (argv.some(handleLaunchArgument)) return;
         void runPromise(
           Effect.gen(function* () {
             const mainWindow = yield* electronWindow.currentMainOrFirst;

@@ -1,5 +1,6 @@
 import { passkeys } from "@clerk/electron/passkeys";
 import { ClerkProvider } from "@clerk/electron/react";
+import { macDesktopLinkProtocol } from "@t3tools/shared/macDesktopLinks";
 import type { ReactNode } from "react";
 
 import { ManagedRelayAuthProvider } from "../../cloud/managedAuth";
@@ -14,8 +15,18 @@ export default function ElectronManagedAuthShell({
   readonly publishableKey: string;
   readonly children: ReactNode;
 }) {
+  const protocol = window.location.protocol;
+  const allowedRedirectProtocols =
+    window.desktopBridge?.getClientPlatform() === "darwin"
+      ? [protocol, macDesktopLinkProtocol(protocol)]
+      : undefined;
   return (
-    <ClerkProvider appearance={clerkAppearance} publishableKey={publishableKey} passkeys={passkeys}>
+    <ClerkProvider
+      {...(allowedRedirectProtocols ? { allowedRedirectProtocols } : {})}
+      appearance={clerkAppearance}
+      publishableKey={publishableKey}
+      passkeys={passkeys}
+    >
       <ManagedRelayAuthProvider>{children}</ManagedRelayAuthProvider>
     </ClerkProvider>
   );
