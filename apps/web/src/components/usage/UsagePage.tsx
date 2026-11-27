@@ -174,8 +174,16 @@ function UsageModelDialogHost({
   );
 }
 
-export function UsagePage() {
-  const [preferences, setPreferences] = useState(readUsagePagePreferences);
+export function UsagePage({
+  refreshLimitsOnOpen = false,
+}: {
+  readonly refreshLimitsOnOpen?: boolean;
+}) {
+  const [preferences, setPreferences] = useState(() => {
+    const saved = readUsagePagePreferences();
+    return refreshLimitsOnOpen ? { ...saved, metric: "limits" as const } : saved;
+  });
+  const forceLimitsRefresh = useRef(refreshLimitsOnOpen);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const hour12 = usePrimarySettings((settings) => resolveHour12(settings.timestampFormat));
   const gt = useGT();
@@ -304,10 +312,12 @@ export function UsagePage() {
     if (showingLimits) {
       refreshingRef.current = true;
       setIsRefreshing(true);
-      void refreshLimits().finally(() => {
-        refreshingRef.current = false;
-        setIsRefreshing(false);
-      });
+      void refreshLimits()
+        .catch(() => undefined)
+        .finally(() => {
+          refreshingRef.current = false;
+          setIsRefreshing(false);
+        });
       return;
     }
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
@@ -337,7 +347,10 @@ export function UsagePage() {
     .sort()
     .join(",");
   const autoRefreshLimits = useEffectEvent(() => {
-    void refreshLimits(true);
+    const automatic = !forceLimitsRefresh.current;
+    forceLimitsRefresh.current = false;
+    if (automatic) void refreshLimits(true).catch(() => undefined);
+    else refreshWindow();
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- refreshes provider limits from the server when the connected environment set changes
   useEffect(() => {
