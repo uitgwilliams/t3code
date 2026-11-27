@@ -1057,9 +1057,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           : shouldRecede
             ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
-    shouldRecede &&
-      (status === "preparing" || status === "working") &&
-      "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
@@ -1132,7 +1129,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
                 shouldRecede
                   ? "text-secondary-label"
-                  : props.isActive || isWoke || status === "input" || status === "request"
+                  : props.isActive ||
+                      isWoke ||
+                      status === "input" ||
+                      status === "request" ||
+                      (!isSelected &&
+                        (status === "preparing" || status === "working" || status === "ready"))
                     ? "text-foreground"
                     : isUnread
                       ? "text-muted-foreground"

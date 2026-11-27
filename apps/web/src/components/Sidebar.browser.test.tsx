@@ -13,6 +13,8 @@ import {
   EnvironmentId,
   type LocalApi,
   ProjectId,
+  ProviderInstanceId,
+  RunId,
   ThreadId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -570,6 +572,77 @@ describe("sidebar thread menu on a phone", () => {
     expect(openCommandPalette).toHaveBeenCalledExactlyOnceWith({ open: "add-project" });
     await expect.element(screen.getByRole("button", { name: "Sheet closed" })).toBeInTheDocument();
   });
+});
+
+it("matches working and finished title emphasis while highlighting the open thread", async () => {
+  using stack = new DisposableStack();
+  const style = document.createElement("style");
+  style.textContent = appCss;
+  document.head.append(style);
+  stack.defer(() => style.remove());
+  const previousSettings = getClientSettings();
+  stack.defer(() => __setClientSettingsForTests(previousSettings));
+  __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, boringSidebarEnabled: true });
+
+  const activeProject = project("active");
+  const open = { ...threadShell(activeProject.id, 0), title: "Selected thread" };
+  const working = makeThreadFixture({
+    ...threadShell(activeProject.id, 1),
+    title: "Working thread",
+    runtime: {
+      status: "running",
+      activeRunId: null,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerName: "Codex",
+      lastError: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  });
+  const finished = {
+    ...threadShell(activeProject.id, 2),
+    title: "Finished thread",
+    runtime: null,
+    lastVisitedAt: "2026-01-01T00:00:00.000Z",
+    latestRun: {
+      runId: RunId.make("finished-run"),
+      status: "completed" as const,
+      assistantMessageId: null,
+      requestedAt: "2026-01-01T00:00:00.000Z",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:01:00.000Z",
+    },
+  };
+  const routeThreadRef = scopeThreadRef(activeProject.environmentId, open.id);
+  vi.mocked(useProjects).mockReturnValue([activeProject]);
+  vi.mocked(useQuietThreadShells).mockReturnValue([open, working, finished]);
+  vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "server", threadRef: routeThreadRef });
+  vi.mocked(useHandleNewThread).mockReturnValue({
+    activeDraftThread: null,
+    activeThread: null,
+    defaultProjectRef: scopeProjectRef(activeProject.environmentId, activeProject.id),
+    defaultProjectFallbackReady: true,
+    handleNewThread: vi.fn().mockResolvedValue(null),
+    routeDraftId: null,
+    routeThreadRef,
+  });
+  await using screen = await render(
+    <SidebarProvider>
+      <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+    </SidebarProvider>,
+  );
+  await expect.element(screen.getByText(working.title, { exact: true })).toBeVisible();
+  const workingTitle = screen.getByText(working.title, { exact: true }).element();
+  const finishedTitle = screen.getByText(finished.title, { exact: true }).element();
+  const openRow = screen
+    .getByText(open.title, { exact: true })
+    .element()
+    .closest('[role="button"]');
+  expect(openRow).toHaveClass("bg-sidebar-row-active");
+  expect(getComputedStyle(workingTitle).fontWeight).toBe(
+    getComputedStyle(finishedTitle).fontWeight,
+  );
+  expect(getComputedStyle(workingTitle).color).toBe(getComputedStyle(finishedTitle).color);
+  expect(getComputedStyle(workingTitle.closest('[role="button"]')!).opacity).toBe("1");
 });
 
 describe("sidebar selection menu", () => {

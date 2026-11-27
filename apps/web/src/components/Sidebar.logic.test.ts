@@ -291,6 +291,21 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe(false);
   });
 
+  it.each(["preparing", "working", "ready"] as const)(
+    "keeps an unselected %s thread at full emphasis",
+    (status) => {
+      expect(
+        shouldRecedeSidebarThread({
+          status,
+          isUnread: false,
+          isWoke: false,
+          isActive: false,
+          isSelected: false,
+        }),
+      ).toBe(false);
+    },
+  );
+
   it("reports worktree setup as preparing, and failed only while the latest run failed", () => {
     expect(
       resolveSidebarThreadStatus({
