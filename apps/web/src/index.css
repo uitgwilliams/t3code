@@ -575,6 +575,32 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+@keyframes sidebar-input-wipe {
+  from {
+    transform: translateX(-100%);
+  }
+  75%,
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .sidebar-input-wipe::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      to right,
+      transparent,
+      color-mix(in srgb, var(--color-indigo-400) 18%, transparent),
+      transparent
+    );
+    animation: sidebar-input-wipe 1.5s linear 4 forwards;
+  }
+}
+
 @keyframes live-tool-shine {
   from {
     background-position:
