@@ -47,8 +47,8 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
   none: msg("None"),
 };
 
-// The default "artwork" follows the running channel, so it is labeled as that channel's art,
-// or as "None" on Latest. The other channel's art is offered as a fixed choice.
+// "artwork" follows the running channel. On Latest the default pill is hidden,
+// and only the fixed artwork choices display anything.
 function environmentIdentificationOptions(
   stageVariant: SidebarStageBackdropVariant | null,
 ): ReadonlyArray<readonly [EnvironmentIdentificationMode, string]> {
@@ -69,7 +69,7 @@ function environmentIdentificationOptions(
     ];
   }
   return [
-    ["artwork", msg("None")],
+    ["pill", msg("None")],
     ["nightly-artwork", msg("Nightly artwork")],
     ["dev-artwork", msg("Dev artwork")],
   ];
@@ -114,10 +114,17 @@ export function AppearanceSettingsPanel() {
   const environmentStageVariant = resolveSidebarStageBackdropVariant(environmentStageLabel);
   const environmentIdentificationOptionList =
     environmentIdentificationOptions(environmentStageVariant);
+  const savedEnvironmentIdentificationMode = settings.environmentIdentificationMode;
+  const selectedEnvironmentIdentificationMode =
+    environmentStageVariant === null &&
+    (savedEnvironmentIdentificationMode === "artwork" ||
+      savedEnvironmentIdentificationMode === "none")
+      ? "pill"
+      : savedEnvironmentIdentificationMode;
   const environmentIdentificationLabel = m(
     environmentIdentificationOptionList.find(
-      ([value]) => value === settings.environmentIdentificationMode,
-    )?.[1] ?? ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode],
+      ([value]) => value === selectedEnvironmentIdentificationMode,
+    )?.[1] ?? ENVIRONMENT_IDENTIFICATION_LABELS[selectedEnvironmentIdentificationMode],
   );
   const effectiveEnvironmentIdentificationMode = useEnvironmentIdentificationMode();
   const themeHidesEnvironmentArtwork =
@@ -487,7 +494,7 @@ export function AppearanceSettingsPanel() {
             }
             control={
               <Select
-                value={settings.environmentIdentificationMode}
+                value={selectedEnvironmentIdentificationMode}
                 onValueChange={(value) => {
                   const option = environmentIdentificationOptionList.find(
                     ([optionValue]) => optionValue === value,

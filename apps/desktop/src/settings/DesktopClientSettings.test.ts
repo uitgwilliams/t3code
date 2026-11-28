@@ -38,7 +38,7 @@ const clientSettings: ClientSettings = {
   diffFilesCollapsed: true,
   diffIgnoreWhitespace: true,
   diffLayout: "stacked",
-  environmentIdentificationMode: "artwork",
+  environmentIdentificationMode: "pill",
   favorites: [],
   fontFamilyCode: "",
   fontFamilyComposer: "",
@@ -114,6 +114,15 @@ const withClientSettings = <A, E, R>(
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("DesktopClientSettings", () => {
+  it.effect("defaults omitted environment identification to the version pill", () =>
+    Effect.gen(function* () {
+      const { environmentIdentificationMode: _environmentIdentificationMode, ...savedSettings } =
+        clientSettings;
+      const decoded = yield* decodeClientSettingsJson(JSON.stringify(savedSettings));
+      assert.equal(decoded.environmentIdentificationMode, "pill");
+    }),
+  );
+
   it.effect("defaults omitted glass opacity to 95 percent", () =>
     Effect.gen(function* () {
       const { glassOpacity: _glassOpacity, ...savedSettings } = clientSettings;
