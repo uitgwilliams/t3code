@@ -945,7 +945,7 @@ export function shouldRecedeSidebarThread(input: {
   if (input.status === "waiting") {
     return true;
   }
-  if (input.status === "approval") {
+  if (input.status === "ready" || input.status === "approval") {
     return !input.isUnread && !input.isWoke;
   }
   return false;

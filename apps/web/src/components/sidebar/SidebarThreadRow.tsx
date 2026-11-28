@@ -1129,14 +1129,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
                 shouldRecede
                   ? "text-secondary-label"
-                  : props.isActive ||
-                      isWoke ||
-                      status === "input" ||
-                      status === "request" ||
-                      (!isSelected &&
-                        (status === "preparing" || status === "working" || status === "ready"))
+                  : props.isActive || isWoke || status === "input" || status === "request"
                     ? "text-foreground"
-                    : isUnread
+                    : isUnread || status === "preparing" || status === "working"
                       ? "text-muted-foreground"
                       : "text-secondary-label/70",
               ),

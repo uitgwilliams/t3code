@@ -291,21 +291,6 @@ describe("resolveSidebarThreadStatus", () => {
     ).toBe(false);
   });
 
-  it.each(["preparing", "working", "ready"] as const)(
-    "keeps an unselected %s thread at full emphasis",
-    (status) => {
-      expect(
-        shouldRecedeSidebarThread({
-          status,
-          isUnread: false,
-          isWoke: false,
-          isActive: false,
-          isSelected: false,
-        }),
-      ).toBe(false);
-    },
-  );
-
   it("reports worktree setup as preparing, and failed only while the latest run failed", () => {
     expect(
       resolveSidebarThreadStatus({
@@ -1086,6 +1071,23 @@ describe("unseen completion with background work", () => {
     expect(isSidebarThreadWorking(thread)).toBe(expected.receded);
     expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: expected.pill });
   });
+
+  it.each([
+    { status: "preparing", isUnread: false, isWoke: false, receded: false },
+    { status: "working", isUnread: false, isWoke: false, receded: false },
+    { status: "ready", isUnread: true, isWoke: false, receded: false },
+    { status: "ready", isUnread: false, isWoke: true, receded: false },
+    { status: "ready", isUnread: false, isWoke: false, receded: true },
+    { status: "approval", isUnread: true, isWoke: false, receded: false },
+    { status: "approval", isUnread: false, isWoke: false, receded: true },
+  ] as const)(
+    "recedes an unselected $status thread (unread $isUnread, woke $isWoke): $receded",
+    ({ receded, ...input }) => {
+      expect(shouldRecedeSidebarThread({ ...input, isActive: false, isSelected: false })).toBe(
+        receded,
+      );
+    },
+  );
 });
 
 describe("Working shelf (beta)", () => {
