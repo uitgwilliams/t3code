@@ -125,6 +125,10 @@ jobs:
       - name: Check i18n catalogs
         run: vp run i18n:check
 
+      # Oxc's JS plugins reserve multi-GiB virtual arenas on the disposable VM.
+      - name: Allow Oxc arena reservations
+        run: sudo sysctl -w vm.overcommit_memory=1
+
       - name: Check
         run: vp check
 
@@ -296,6 +300,10 @@ jobs:
       - name: Test release checks
         run: node --test .github/scripts/check-nightly-release.test.cjs .github/scripts/vercel-deployment-output.test.cjs .github/scripts/mobile-preview-comment.test.cjs .github/scripts/mobile-ios-preview-record.test.cjs .github/scripts/test-delta.test.cjs
 
+      # The lint plugin tests spawn Oxc with the same fixed-size arenas as lint.
+      - name: Allow Oxc arena reservations
+        run: sudo sysctl -w vm.overcommit_memory=1
+
       # `changes` lists the affected packages, or nothing when all of them are.
       - name: Test
         env:
@@ -308,11 +316,7 @@ jobs:
             for package in $TEST_PACKAGES; do filters+=(--filter "$package"); done
           fi
           # The runner's trace writer can crash on surrogate pairs in test output.
-          vp run --parallel --concurrency-limit 2 "${filters[@]}" test 2>&1 | python3 -u -c '
-          import sys
-          for line in sys.stdin:
-              sys.stdout.write(line.encode("ascii", "backslashreplace").decode("ascii"))
-          '
+          vp run --parallel --concurrency-limit 2 "${filters[@]}" test 2>&1 | python3 -u .github/scripts/runner-safe-output.py
 
   # The web suite is the largest outside the server. In the shared Test job it
   # started last and ran alone for about 40s after everything else finished.
@@ -378,7 +382,9 @@ jobs:
           fi
 
       - name: Test
-        run: vp run --filter @t3tools/web test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: |
+          set -o pipefail
+          vp run --filter @t3tools/web test --shard ${{ matrix.shard }}/${{ strategy.job-total }} 2>&1 | python3 -u .github/scripts/runner-safe-output.py
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
