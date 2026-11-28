@@ -28,12 +28,13 @@ jobs:
   fingerprint:
     name: Native fingerprint diff
     if: github.event.action != 'edited' || github.event.changes.base
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
       APP_VARIANT: production
-      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -58,6 +59,12 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
             echo "No native fingerprint inputs changed; clearing any stale native change label." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Install native build dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential
 
       - name: Setup Vite+
         if: steps.changes.outputs.relevant == 'true'
