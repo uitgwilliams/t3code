@@ -384,7 +384,7 @@ jobs:
       - name: Test
         run: |
           set -o pipefail
-          vp run --filter @t3tools/web test --shard ${{ matrix.shard }}/${{ strategy.job-total }} 2>&1 | python3 -u .github/scripts/runner-safe-output.py
+          vp run --filter @t3tools/web test --maxWorkers 2 --shard ${{ matrix.shard }}/${{ strategy.job-total }} 2>&1 | python3 -u .github/scripts/runner-safe-output.py
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
