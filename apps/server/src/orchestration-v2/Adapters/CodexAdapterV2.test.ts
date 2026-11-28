@@ -4040,6 +4040,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               params: {
                 threadId: nativeThreadId,
                 excludeTurns: true,
+                sandbox: "danger-full-access",
                 config: CodexAdapterV2.CODEX_THREAD_CONFIG,
               },
             },
@@ -4104,14 +4105,13 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       yield* harness.runtime.resumeThread({
         providerThread: { ...harness.providerThread, appThreadId: null },
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        runtimePolicy: { ...CODEX_TEST_RUNTIME_POLICY, runtimeMode: "auto" },
       });
       const explicitThreadId = ThreadId.make(`thread-${scenario}-explicit`);
       yield* harness.runtime.resumeThread({
         threadId: explicitThreadId,
         providerThread: harness.providerThread,
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
       });
 
       assert.equal(resumed.nativeThreadRef?.nativeId, nativeThreadId);
@@ -4156,6 +4156,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       const params = {
         threadId: nativeThreadId,
         excludeTurns: true,
+        sandbox: "danger-full-access",
         cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
         model: CODEX_TEST_MODEL_SELECTION.model,
         config: CodexAdapterV2.CODEX_THREAD_CONFIG,
@@ -4271,6 +4272,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       const params = {
         threadId: nativeThreadId,
         excludeTurns: true,
+        sandbox: "danger-full-access",
         cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
         model: CODEX_TEST_MODEL_SELECTION.model,
         config: CodexAdapterV2.CODEX_THREAD_CONFIG,
@@ -4855,6 +4857,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 params: {
                   threadId: nativeThreadId,
                   excludeTurns: true,
+                  sandbox: "danger-full-access",
                   cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
                   model: CODEX_TEST_MODEL_SELECTION.model,
                   config: CodexAdapterV2.CODEX_THREAD_CONFIG,

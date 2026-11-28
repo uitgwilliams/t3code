@@ -7985,6 +7985,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const appThreadId = threadInput.threadId ?? threadInput.providerThread.appThreadId;
               const resume = resumeNativeThread(nativeThreadId, {
                 excludeTurns: true,
+                // Codex loads workspace instructions during resume, before turn/start sets the sandbox.
+                ...(threadInput.runtimePolicy?.runtimeMode === "full-access"
+                  ? { sandbox: "danger-full-access" }
+                  : {}),
                 ...codexThreadRuntimeParams({
                   threadId: appThreadId,
                   mcpSession: yield* readMcpSession(appThreadId),
