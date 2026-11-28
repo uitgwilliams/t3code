@@ -47,6 +47,8 @@ try {
 const clientPlatform = process.platform;
 
 if (clientPlatform === "darwin") {
+  document.documentElement?.setAttribute("data-desktop-glass", "macos");
+
   // Native buttons ignore Chromium zoom; reserve native points even after reload.
   const syncWindowControlInset = () => {
     document.documentElement.style.setProperty(

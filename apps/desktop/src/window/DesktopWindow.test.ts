@@ -394,6 +394,7 @@ function layerTest(input: {
 const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | null)[]) =>
   Effect.gen(function* () {
     const createdWindows = yield* Ref.make<Electron.BrowserWindow[]>([]);
+    const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
     const createCalls = yield* Ref.make(0);
     const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
     const revealedWindows = yield* Ref.make<Electron.BrowserWindow[]>([]);
@@ -411,8 +412,9 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
     });
 
     const electronWindowShape = {
-      create: () =>
+      create: (options: Electron.BrowserWindowConstructorOptions) =>
         Effect.gen(function* () {
+          createdWindowOptions.push(options);
           const index = yield* Ref.getAndUpdate(createCalls, (count) => count + 1);
           const outcome = createOutcomes[index] ?? null;
           if (outcome === null) {
@@ -428,6 +430,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
                 frame: null,
                 transparent: null,
                 backgroundColor: null,
+                vibrancy: null,
+                visualEffectState: null,
                 webPreferences: {
                   preload: null,
                   partition: null,
@@ -497,7 +501,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
       Layer.merge(DesktopState.layer),
     );
 
-    return { layer, createCalls, mainWindow, revealedWindows } as const;
+    return { layer, createCalls, createdWindowOptions, mainWindow, revealedWindows } as const;
   });
 
 const captureOne = DesktopSnapShotId.make("11111111-1111-4111-8111-111111111111");
@@ -1344,6 +1348,47 @@ describe("DesktopWindow", () => {
       }),
   );
 
+  it.effect.each(["darwin", "win32", "linux"] as const)(
+    "uses platform-specific backing for the %s main window only",
+    (platform) =>
+      Effect.gen(function* () {
+        const main = makeFakeBrowserWindow();
+        const auxiliary = makeFakeBrowserWindow();
+        const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+        const layer = layerTest({
+          window: main.window,
+          createCount: yield* Ref.make(0),
+          mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
+          platform,
+          createdWindowOptions,
+          appearanceWindows: [
+            { window: main.window, titleBarOverlay: platform !== "darwin" },
+            { window: auxiliary.window, titleBarOverlay: false },
+          ],
+        });
+
+        yield* Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+          yield* desktopWindow.syncAppearance;
+        }).pipe(Effect.provide(layer));
+
+        const backgroundColor = platform === "darwin" ? "#00000000" : "#ffffff";
+        assert.lengthOf(createdWindowOptions, 1);
+        assert.equal(createdWindowOptions[0]?.backgroundColor, backgroundColor);
+        assert.equal(
+          createdWindowOptions[0]?.vibrancy,
+          platform === "darwin" ? "under-window" : undefined,
+        );
+        assert.equal(
+          createdWindowOptions[0]?.visualEffectState,
+          platform === "darwin" ? "active" : undefined,
+        );
+        assert.deepEqual(vi.mocked(main.window.setBackgroundColor).mock.calls, [[backgroundColor]]);
+        assert.deepEqual(vi.mocked(auxiliary.window.setBackgroundColor).mock.calls, [["#ffffff"]]);
+      }),
+  );
+
   it.effect("updates title bar overlays only on windows created with one", () =>
     Effect.gen(function* () {
       const framed = makeFakeBrowserWindow();
@@ -1745,6 +1790,11 @@ describe("DesktopWindow", () => {
 
           yield* desktopWindow.showConnectingSplash;
           assert.equal(yield* Ref.get(scenario.createCalls), 1);
+          assert.equal(scenario.createdWindowOptions[0]?.backgroundColor, "#ffffff");
+          assert.isUndefined(scenario.createdWindowOptions[0]?.vibrancy);
+          assert.isUndefined(scenario.createdWindowOptions[0]?.webPreferences?.preload);
+          yield* desktopWindow.syncAppearance;
+          assert.deepEqual(vi.mocked(splash.window.setBackgroundColor).mock.calls, [["#ffffff"]]);
           yield* TestClock.adjust("1 second");
           assert.include(splashHtml(), "Connecting to WSL…");
           const initialLoads = splash.loadURL.mock.calls.length;

@@ -117,7 +117,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      previewMiniPlayerLayout.ts), then dialogs and popovers (50 and up). */
   --z-sheet: 46;
   --glass-blur: 12px;
-  --glass-opacity: 90%;
+  --glass-opacity: 95%;
   --glass-saturation: 1.14;
   --desktop-window-right-resize-inset: 0px;
   --workspace-topbar-height: 52px;
@@ -399,25 +399,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 @utility sidebar-glass {
-  --sidebar-glass-tint: calc((100% - var(--glass-opacity)) * 0.65);
-  background-color: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
-  background-image:
-    var(--surface-grain),
-    radial-gradient(
-      ellipse at bottom left,
-      color-mix(in srgb, #428681 var(--sidebar-glass-tint), transparent),
-      transparent 68%
-    ),
-    radial-gradient(
-      ellipse at top right,
-      color-mix(in srgb, #65718c var(--sidebar-glass-tint), transparent),
-      transparent 62%
-    );
-  background-repeat: repeat, no-repeat, no-repeat;
-  background-size:
-    var(--surface-grain-size),
-    100% 100%,
-    100% 100%;
+  background-color: var(--sidebar);
+
+  @media (prefers-reduced-transparency: no-preference) {
+    html[data-desktop-glass="macos"] [data-app-sidebar] & {
+      background-color: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
+    }
+  }
 }
 
 @utility alert-glass {
@@ -783,6 +771,23 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
   body {
     @apply text-foreground relative;
+  }
+
+  @media (prefers-reduced-transparency: no-preference) {
+    /* Boot and standalone routes still need their canvas behind the page. */
+    html[data-desktop-glass="macos"]:has([data-app-sidebar] [data-slot="sidebar-inner"]) {
+      &,
+      & body {
+        background-color: transparent !important;
+        background-image: none !important;
+      }
+    }
+  }
+}
+
+@media (prefers-reduced-transparency: no-preference) {
+  html[data-desktop-glass="macos"] [data-slot="sidebar-inset"] {
+    background-color: var(--app-chrome-background);
   }
 }
 

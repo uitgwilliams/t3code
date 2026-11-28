@@ -148,6 +148,25 @@ describe("ElectronWindow", () => {
     }).pipe(Effect.provide(layerTestFor("win32"))),
   );
 
+  it.effect("forwards macOS vibrancy options and includes them in creation errors", () =>
+    Effect.gen(function* () {
+      const options = {
+        vibrancy: "under-window",
+        visualEffectState: "active",
+        backgroundColor: "#00000000",
+      } satisfies Electron.BrowserWindowConstructorOptions;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      yield* electronWindow.create(options);
+      assert.deepEqual(browserWindowMock.mock.calls.at(-1), [options]);
+
+      browserWindowMock.mockImplementationOnce(() => {
+        throw new Error("construction failed");
+      });
+      const error = yield* Effect.flip(electronWindow.create(options));
+      assert.include(error.options, options);
+    }).pipe(Effect.provide(layerTestFor("darwin"))),
+  );
+
   it.effect("reports which windows were created with a title bar overlay", () =>
     Effect.gen(function* () {
       const framed = { isDestroyed: () => false };
