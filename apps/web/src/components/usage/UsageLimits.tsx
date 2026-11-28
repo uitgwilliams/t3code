@@ -11,6 +11,8 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
+  collectLimitAccounts,
+  collectLimitPools,
   type LimitPace,
   paceOf,
   paceRemainingPercent,
@@ -39,6 +41,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SidebarUsageSettings } from "./SidebarUsageSettings";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { formatResetsIn, resetCreditChoices } from "@t3tools/shared/usageLimitsCopy";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
@@ -428,5 +431,10 @@ export function UsageLimitsSection({
       ];
     }),
   );
-  return <UsageLimitsPooled presentations={selected} now={now} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <SidebarUsageSettings pools={collectLimitPools(collectLimitAccounts(presentations), now)} />
+      <UsageLimitsPooled presentations={selected} now={now} />
+    </div>
+  );
 }
