@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - mac-nightly
 
 permissions:
   contents: read
@@ -18,11 +19,11 @@ jobs:
   # server shards, a server change does not run the mobile tests, and the macOS
   # lint (~6.7x a Linux minute) runs only for native mobile sources.
   # .github/scripts/ci-changes.cjs maps changed files to workspace packages and
-  # their dependents. Pushes to main still run every Linux job. Detection fails
+  # their dependents. Pushes run every Linux job. Detection fails
   # open: if the diff cannot be resolved, everything runs.
   changes:
     name: Changes
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
     timeout-minutes: 5
     outputs:
       typecheck: ${{ steps.detect.outputs.typecheck }}
@@ -64,8 +65,8 @@ jobs:
       contents: read
       id-token: write
     name: Lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -83,6 +84,11 @@ jobs:
             printf 'PR evidence must be uploaded to GitHub, not committed:\n%s\n' "$files" >&2
             exit 1
           fi
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
@@ -126,8 +132,8 @@ jobs:
     name: Build and Typecheck
     needs: changes
     if: ${{ !cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -138,26 +144,10 @@ jobs:
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
-      - uses: ./.github/actions/setup-apt-mirrors
-        if: needs.changes.outputs.build != 'false'
-
-      # Runs in the background while Vite+ installs; the step before the build waits for it.
-      # Xvfb is for the desktop launch check below.
-      - name: Start installing browser secret helper build libraries
-        if: needs.changes.outputs.build != 'false'
+      - name: Install Linux build dependencies
         run: |
-          # Fetch only the indexes these main and universe packages need. The full set is ~42 MB,
-          # which a slow mirror can stretch past the wait below.
-          sudo sed -i -e 's|http://|https://|g' -e 's/^Components: .*/Components: main universe/' \
-            /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
-          (
-            set +e
-            sudo apt-get update -o Acquire::Languages=none \
-              -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false \
-              -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false &&
-              sudo apt-get install -y libsecret-1-dev pkg-config xvfb
-            echo "$?" > "$RUNNER_TEMP/apt-status"
-          ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential pkg-config libsecret-1-dev
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
@@ -176,30 +166,9 @@ jobs:
         id: electron
         run: vp run --filter @t3tools/desktop ensure:electron
 
-      # Runs in the background while the build runs, and reports in the last
-      # step: neither result hides the other.
-      - name: Start typecheck
-        id: typecheck
-        if: ${{ !cancelled() && steps.electron.outcome == 'success' && needs.changes.outputs.typecheck != 'false' }}
-        run: |
-          (
-            set +e
-            vpr typecheck
-            echo "$?" > "$RUNNER_TEMP/typecheck-status"
-          ) > "$RUNNER_TEMP/typecheck.log" 2>&1 < /dev/null &
-
-      - name: Finish installing browser secret helper build libraries
-        id: apt
-        if: ${{ !cancelled() && needs.changes.outputs.build != 'false' }}
-        timeout-minutes: 5
-        run: |
-          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
-          cat "$RUNNER_TEMP/apt.log"
-          exit "$(cat "$RUNNER_TEMP/apt-status")"
-
       - name: Build desktop pipeline
         id: build
-        if: ${{ !cancelled() && steps.electron.outcome == 'success' && steps.apt.outcome == 'success' && needs.changes.outputs.build != 'false' }}
+        if: ${{ !cancelled() && steps.electron.outcome == 'success' && needs.changes.outputs.build != 'false' }}
         run: vp run build:desktop
 
       - name: Verify preload bundle output
@@ -213,11 +182,19 @@ jobs:
           node apps/server/scripts/cli.ts build-exe
           apps/server/dist-exe/t3 --version
 
+      - name: Install Electron launch dependencies
+        id: electron_deps
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && needs.changes.outputs.desktop_launch != 'false' }}
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb xauth fonts-liberation libgtk-3-0t64 libnss3 libnspr4 libatk1.0-0t64 \
+            libatk-bridge2.0-0t64 libcups2t64 libdrm2 libgbm1 libasound2t64 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2
+
       # The release launch check, run unpackaged against the same old-state fixture, for
       # startup and sidebar changes. Packaging and signing stay release-only.
       - name: Open the seeded thread in the built desktop app
         id: desktop_launch
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && needs.changes.outputs.desktop_launch != 'false' }}
+        if: ${{ !cancelled() && steps.electron_deps.outcome == 'success' }}
         timeout-minutes: 4
         run: |
           electron=$(node -p "require('./apps/desktop/node_modules/electron')")
@@ -267,20 +244,16 @@ jobs:
         timeout-minutes: 3
         run: node apps/web/scripts/verify-built-boot.ts
 
+      # Keep the TypeScript workers separate from the desktop and CLI builds on a 6 GiB guest.
       - name: Typecheck
-        if: ${{ !cancelled() && steps.typecheck.outcome == 'success' }}
-        timeout-minutes: 5
-        run: |
-          until test -s "$RUNNER_TEMP/typecheck-status"; do sleep 1; done
-          cat "$RUNNER_TEMP/typecheck.log"
-          exit "$(cat "$RUNNER_TEMP/typecheck-status")"
+        if: ${{ !cancelled() && steps.electron.outcome == 'success' && needs.changes.outputs.typecheck != 'false' }}
+        run: vp run -r --cache --concurrency-limit 2 typecheck
 
   # Everything except `t3` (apps/server) and the web app, which has its own job
   # below. `--parallel` drops the package dependency ordering that `vp run`
   # applies by default: these `test` tasks declare no `dependsOn` and resolve
   # workspace deps from source, so ordering only bought us idle runners between
-  # dependency layers. The concurrency limit stays at the default 4 so peak load
-  # per runner is unchanged.
+  # dependency layers. Limit concurrent packages to leave memory for test workers.
   test:
     permissions:
       contents: read
@@ -288,8 +261,8 @@ jobs:
     name: Test
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -300,24 +273,10 @@ jobs:
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
-      - uses: ./.github/actions/setup-apt-mirrors
-
-      # The desktop tests compile the browser secret helper. The install runs in
-      # the background while Vite+ installs; the step before the tests waits for it.
-      - name: Start installing browser secret helper build libraries
+      - name: Install Linux build dependencies
         run: |
-          # Fetch only the indexes these main and universe packages need. The full set is ~42 MB,
-          # which a slow mirror can stretch past the wait below.
-          sudo sed -i -e 's|http://|https://|g' -e 's/^Components: .*/Components: main universe/' \
-            /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
-          (
-            set +e
-            sudo apt-get update -o Acquire::Languages=none \
-              -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false \
-              -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false &&
-              sudo apt-get install -y libsecret-1-dev pkg-config
-            echo "$?" > "$RUNNER_TEMP/apt-status"
-          ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential pkg-config libsecret-1-dev
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
@@ -341,13 +300,6 @@ jobs:
       - name: Test release checks
         run: node --test .github/scripts/check-nightly-release.test.cjs .github/scripts/vercel-deployment-output.test.cjs .github/scripts/mobile-preview-comment.test.cjs .github/scripts/mobile-ios-preview-record.test.cjs .github/scripts/test-delta.test.cjs .github/scripts/workflow-credentials.test.cjs
 
-      - name: Finish installing browser secret helper build libraries
-        timeout-minutes: 5
-        run: |
-          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
-          cat "$RUNNER_TEMP/apt.log"
-          exit "$(cat "$RUNNER_TEMP/apt-status")"
-
       # `changes` lists the affected packages, or nothing when all of them are.
       - name: Test
         env:
@@ -360,7 +312,7 @@ jobs:
             for package in $TEST_PACKAGES; do filters+=(--filter "$package"); done
           fi
           # The runner's trace writer can crash on surrogate pairs in test output.
-          vp run --parallel --concurrency-limit 4 "${filters[@]}" test 2>&1 | python3 -u -c '
+          vp run --parallel --concurrency-limit 2 "${filters[@]}" test 2>&1 | python3 -u -c '
           import sys
           for line in sys.stdin:
               sys.stdout.write(line.encode("ascii", "backslashreplace").decode("ascii"))
@@ -378,8 +330,8 @@ jobs:
     name: Test Web ${{ matrix.shard }}
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -393,6 +345,11 @@ jobs:
             !/.repos/
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
@@ -440,10 +397,10 @@ jobs:
       contents: read
       id-token: write
     name: Test Server ${{ matrix.shard }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
     # Shards take 2-5 minutes. When the shared task cache throttles reads, each
     # failed fetch stalls vp for 15-90s, which pushed shards past 10 minutes.
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -463,6 +420,12 @@ jobs:
       - name: Detect affected jobs
         id: changes
         uses: ./.github/actions/ci-changes
+
+      - name: Install Linux build dependencies
+        if: steps.changes.outputs.test_server != 'false'
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential
 
       - name: Setup Vite+
         if: steps.changes.outputs.test_server != 'false'
@@ -517,9 +480,9 @@ jobs:
           T3CODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/t3code-transfer-budget.md
           T3CODE_TRANSFER_BUDGET_RESULT_PATH: ${{ runner.temp }}/thread-transfer-result.json
           T3CODE_TRANSFER_BUDGET_SCENARIOS_PATH: ${{ runner.temp }}/thread-transfer-scenarios.json
-        # One process per file spends ~2s starting before its tests run; one file per vCPU overlaps that.
+        # Limit concurrent test processes to leave memory for browser integration tests.
         run: >-
-          vp run test:cached -- --shard ${{ matrix.shard }}/${{ strategy.job-total }} --concurrency 4
+          vp run test:cached -- --shard ${{ matrix.shard }}/${{ strategy.job-total }} --concurrency 2
           --uncached apps/server/integration/transferBudgetV2.integration.test.ts
           --verify-hits 1 apps/server
 
@@ -570,8 +533,8 @@ jobs:
     name: Rust
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -581,6 +544,11 @@ jobs:
             !/.repos/
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
@@ -603,7 +571,7 @@ jobs:
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
+    if: ${{ github.repository == 'pingdotgg/t3code' && !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
     runs-on: macos-26
     timeout-minutes: 10
     steps:
@@ -637,8 +605,8 @@ jobs:
     name: Release Smoke
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.release_smoke != 'false' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -648,6 +616,11 @@ jobs:
             !/.repos/
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libatomic1 build-essential
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
@@ -677,23 +650,24 @@ jobs:
         mobile_native_static_analysis,
         release_smoke,
       ]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
     timeout-minutes: 5
     steps:
       - name: Require every job to pass
         env:
+          REPOSITORY: ${{ github.repository }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           # A job may skip only when `changes` said every gate it represents was
-          # not needed. Gates are keyed by job name, except merged Build and the
-          # macOS lint.
-          echo "$RESULTS" | jq -e '.changes.outputs as $gates
+          # not needed or when the macOS lint is upstream-only.
+          echo "$RESULTS" | jq -e --arg repository "$REPOSITORY" '.changes.outputs as $gates
             | {build: ["build", "typecheck", "desktop_launch"], mobile_native_static_analysis: ["mobile_native"]} as $renamed
             | all(to_entries[];
                 .value.result == "success"
                 or (.value.result == "skipped"
-                  and (($renamed[.key] // [.key]) | all(.[]; $gates[.] == "false"))))' > /dev/null
+                  and ((.key == "mobile_native_static_analysis" and $repository != "pingdotgg/t3code")
+                    or (($renamed[.key] // [.key]) | all(.[]; $gates[.] == "false")))))' > /dev/null
 
       # thread-transfer-report.yml reads this artifact after CI, so a run whose
       # server tests ran must have produced it.

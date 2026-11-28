@@ -27,8 +27,10 @@ jobs:
   request:
     name: Preview request
     if: >-
-      github.event.pull_request.head.repo.full_name != github.repository &&
-      github.event.label.name == '🚀 Mobile Continuous Deployment'
+      github.repository == 'pingdotgg/t3code' && (
+        github.event.pull_request.head.repo.full_name != github.repository &&
+        github.event.label.name == '🚀 Mobile Continuous Deployment'
+      )
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read

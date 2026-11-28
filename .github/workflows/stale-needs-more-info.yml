@@ -9,7 +9,8 @@ permissions: {}
 
 jobs:
   stale:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       actions: write
       issues: write

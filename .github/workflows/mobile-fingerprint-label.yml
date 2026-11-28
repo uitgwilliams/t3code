@@ -23,7 +23,7 @@ jobs:
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
     timeout-minutes: 5
     permissions:
       actions: read
@@ -88,7 +88,11 @@ jobs:
           ARTIFACT_ID: ${{ steps.pr.outputs.artifact_id }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/fingerprint-result.zip"
+          # Curl drops Authorization when GitHub redirects to the artifact storage origin.
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --output "$RUNNER_TEMP/fingerprint-result.zip" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip"
           changed="$(unzip -p "$RUNNER_TEMP/fingerprint-result.zip" changed-platforms)"
           if [[ ! "$changed" =~ ^((ios|android)( (ios|android))?)?$ ]]; then
             echo "Unexpected changed-platforms value '$changed'." >&2
