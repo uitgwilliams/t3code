@@ -784,6 +784,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     @apply text-foreground relative;
   }
 
+  html[data-desktop-glass="macos"] {
+    background-color: light-dark(#ffffff, #000000) !important;
+  }
+
   @media (prefers-reduced-transparency: no-preference) {
     /* Boot and standalone routes still need their canvas behind the page. */
     html[data-desktop-glass="macos"]:has([data-app-sidebar] [data-slot="sidebar-inner"]):has(
