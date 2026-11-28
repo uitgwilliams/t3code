@@ -26,7 +26,8 @@ jobs:
   open-limit:
     name: Open PR limit
     if: github.event_name == 'pull_request_target'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -52,7 +53,8 @@ jobs:
   sweep:
     name: Conflict and close windows
     if: github.event_name != 'pull_request_target'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write

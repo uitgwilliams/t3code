@@ -21,7 +21,8 @@ concurrency:
 jobs:
   label:
     name: Label issues by author trust
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write

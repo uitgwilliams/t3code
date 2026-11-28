@@ -14,7 +14,8 @@ permissions: {}
 jobs:
   sync:
     name: Sync issue labels
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       issues: write
     steps:

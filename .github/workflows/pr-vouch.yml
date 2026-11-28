@@ -33,7 +33,8 @@ jobs:
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request && contains(github.event.comment.body, '/recheck-vouch'))
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       pull-requests: read
     outputs:
@@ -81,7 +82,8 @@ jobs:
     name: Label PR ${{ matrix.target.number }}
     needs: collect-targets
     if: ${{ needs.collect-targets.outputs.targets != '[]' }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, bair-h1]
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
