@@ -335,7 +335,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        # Three shards keep each 6 GiB bair-ci VM under its memory limit.
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
