@@ -38,6 +38,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
+import { resolveEnvironmentIdentificationSelection } from "./environmentIdentification.logic";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: msg("Artwork"),
@@ -114,13 +115,10 @@ export function AppearanceSettingsPanel() {
   const environmentStageVariant = resolveSidebarStageBackdropVariant(environmentStageLabel);
   const environmentIdentificationOptionList =
     environmentIdentificationOptions(environmentStageVariant);
-  const savedEnvironmentIdentificationMode = settings.environmentIdentificationMode;
-  const selectedEnvironmentIdentificationMode =
-    environmentStageVariant === null &&
-    (savedEnvironmentIdentificationMode === "artwork" ||
-      savedEnvironmentIdentificationMode === "none")
-      ? "pill"
-      : savedEnvironmentIdentificationMode;
+  const selectedEnvironmentIdentificationMode = resolveEnvironmentIdentificationSelection(
+    settings.environmentIdentificationMode,
+    environmentStageVariant,
+  );
   const environmentIdentificationLabel = m(
     environmentIdentificationOptionList.find(
       ([value]) => value === selectedEnvironmentIdentificationMode,
@@ -481,7 +479,7 @@ export function AppearanceSettingsPanel() {
             {...searchableSetting("environment-identification")}
             description={environmentIdentificationDescription}
             resetAction={
-              settings.environmentIdentificationMode !== DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
+              selectedEnvironmentIdentificationMode !== DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
                 <SettingResetButton
                   ariaLabel={gt("Reset environment identification to default")}
                   onClick={() =>

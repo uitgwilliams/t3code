@@ -14,6 +14,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
       </div>
     </div>
     <main data-slot="sidebar-inset" class="bg-background surface-grain"></main>
+    <div data-slot="sidebar" data-mobile="true" class="bg-sidebar surface-grain"></div>
     <div class="sidebar-glass" data-auxiliary-sidebar></div>
   `;
   document.body.append(workspace);
@@ -21,6 +22,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
   const sidebar = workspace.querySelector('[data-slot="sidebar-inner"]')!;
   const backdrop = workspace.querySelector(".sidebar-stage-backdrop")!;
   const inset = workspace.querySelector("main")!;
+  const mobileSidebar = workspace.querySelector('[data-slot="sidebar"][data-mobile="true"]')!;
   const auxiliarySidebar = workspace.querySelector("[data-auxiliary-sidebar]")!;
   const styles = [root, document.body].map((element) => [element, element.style.cssText] as const);
   const customChrome = "oklch(0.2 0 0 / 0.5)";
@@ -53,6 +55,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
     for (const [element] of styles) element.style.backgroundColor = customChrome;
 
     expect(getComputedStyle(sidebar).backgroundColor).toBe(solidSidebar);
+    expect(getComputedStyle(mobileSidebar).backgroundColor).toBe(solidSidebar);
     expect(getComputedStyle(root).backgroundColor).toBe(customChrome);
 
     inset.remove();
@@ -91,6 +94,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
     expect(getComputedStyle(sidebar).backgroundImage).toBe("none");
     expect(getComputedStyle(sidebar).opacity).toBe("1");
     expect(getComputedStyle(sidebar).backgroundColor).toBe("color(srgb 0.2 0.2 0.2 / 0.95)");
+    expect(getComputedStyle(mobileSidebar).backgroundColor).toBe(solidSidebar);
 
     expect(getComputedStyle(backdrop).opacity).toBe("0.95");
     expect(getComputedStyle(backdrop, "::after").display).toBe("none");
@@ -101,6 +105,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
         opacity === 100 ? "color(srgb 0.2 0.2 0.2)" : "color(srgb 0.2 0.2 0.2 / 0.4)",
       );
       expect(getComputedStyle(backdrop).opacity).toBe(String(opacity / 100));
+      expect(getComputedStyle(mobileSidebar).backgroundColor).toBe(solidSidebar);
     }
 
     root.style.setProperty("--glass-opacity", "40%");
@@ -108,6 +113,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
     expect(getComputedStyle(backdrop).opacity).toBe("1");
     expect(getComputedStyle(backdrop, "::after").display).toBe("block");
     expect(getComputedStyle(sidebar).backgroundColor).toBe(solidSidebar);
+    expect(getComputedStyle(mobileSidebar).backgroundColor).toBe(solidSidebar);
     expectOpaqueCanvas();
   } finally {
     delete root.dataset.desktopGlass;

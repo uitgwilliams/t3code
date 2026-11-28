@@ -815,6 +815,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+[data-slot="sidebar"][data-mobile="true"] {
+  background-color: var(--sidebar);
+  background-color: rgb(from var(--sidebar) r g b / 1);
+}
+
 @layer components {
   /* AnimatedHeight owns resizing for its contents. Nested collapsibles must
      expose their final layout immediately, otherwise each animation frame
