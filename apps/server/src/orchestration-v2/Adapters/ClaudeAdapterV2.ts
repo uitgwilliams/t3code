@@ -15360,7 +15360,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           // Any message in any transcript copy means Claude may still resume it.
           let found = false;
           let unreadable = false;
-          for (const project of yield* fileSystem.readDirectory(projectsDir)) {
+          // No projects dir at all holds no transcript; other read errors stay unknown.
+          const projects = yield* fileSystem.readDirectory(projectsDir).pipe(
+            Effect.asSome,
+            Effect.catchIf(
+              (error) => error.reason._tag === "NotFound",
+              () => Effect.succeed(Option.none<ReadonlyArray<string>>()),
+            ),
+          );
+          if (Option.isNone(projects)) return "absent" as const;
+          for (const project of projects.value) {
             const transcriptPath = path.join(projectsDir, project, `${nativeThreadId}.jsonl`);
             // Only a confirmed missing file counts as absent; any other error leaves the state unknown.
             const exists = yield* fileSystem.stat(transcriptPath).pipe(

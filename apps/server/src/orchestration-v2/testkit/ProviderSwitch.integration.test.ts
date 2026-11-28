@@ -7048,6 +7048,225 @@ describe("orchestration v2 provider switching", () => {
     }),
   );
 
+  it.live("carries a side chat's opening context into a fresh session after a switch", () =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace("side-chat-fresh-session");
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const parentThreadId = ThreadId.make("thread:side-chat-fresh-session:parent");
+      const sideThreadId = ThreadId.make("thread:side-chat-fresh-session:side");
+      const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+        makeTestAdapter({
+          instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+          driver: CLAUDE_DRIVER,
+          capabilities: ClaudeProviderCapabilitiesV2,
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+        }),
+        makeTestAdapter({
+          instanceId: CODEX_MODEL_SELECTION.instanceId,
+          driver: CODEX_DRIVER,
+          capabilities: CodexProviderCapabilitiesV2,
+          modelSelection: CODEX_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+        }),
+      ]);
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const send = (threadId: ThreadId, name: string, modelSelection: ModelSelection) =>
+          orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:side-chat-fresh-session:${name}`),
+            threadId,
+            messageId: MessageId.make(`message:side-chat-fresh-session:${name}`),
+            text: `Prompt ${name}`,
+            attachments: [],
+            modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          });
+        const settle = (threadId: ThreadId) =>
+          worker.drain().pipe(
+            Effect.andThen(waitForIdle(threadId)),
+            Effect.tap(() => worker.drain()),
+          );
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:side-chat-fresh-session:create"),
+          threadId: parentThreadId,
+          projectId,
+          title: "Side chat fresh session",
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+        yield* send(parentThreadId, "parent", CLAUDE_MODEL_SELECTION);
+        const parent = yield* settle(parentThreadId);
+        yield* orchestrator.dispatch({
+          type: "thread.fork",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:side-chat-fresh-session:side-chat"),
+          sourceThreadId: parentThreadId,
+          targetThreadId: sideThreadId,
+          sourcePoint: { type: "run", runId: parent.runs[0]!.id },
+          title: "Side chat",
+          sideChat: true,
+        });
+        yield* send(sideThreadId, "side-first", CLAUDE_MODEL_SELECTION);
+        const first = yield* settle(sideThreadId);
+        const oldNativeId = first.providerThreads.find((thread) => thread.driver === CLAUDE_DRIVER)
+          ?.nativeThreadRef?.nativeId;
+        yield* send(sideThreadId, "side-codex", CODEX_MODEL_SELECTION);
+        yield* settle(sideThreadId);
+        yield* send(sideThreadId, "side-back", CLAUDE_MODEL_SELECTION);
+        const returned = yield* settle(sideThreadId);
+
+        const turns = yield* Ref.get(capturedTurns);
+        const turnFor = (name: string) =>
+          turns.find((turn) => turn.text.endsWith(`Prompt ${name}`))!.text;
+        const sideChatNote = "You are in a side chat beside the main thread.";
+        assert.include(turnFor("side-first"), sideChatNote);
+        const newNativeId = returned.providerThreads.find(
+          (thread) => thread.driver === CLAUDE_DRIVER,
+        )?.nativeThreadRef?.nativeId;
+        assert.isDefined(oldNativeId);
+        assert.notEqual(newNativeId, oldNativeId);
+        // The side chat's opening context reached it only through the handoff the old session took.
+        const fresh = turnFor("side-back");
+        assert.include(fresh, sideChatNote);
+        assert.include(fresh, "Prompt side-codex");
+        assert.include(fresh, "Prompt side-first");
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: "side-chat-fresh-session",
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            layerRegistry,
+          ),
+        ),
+      );
+    }),
+  );
+
+  it.live("leaves a schedule's fresh run out of a fresh session's recovered history", () =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace("scheduled-run-recovery");
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const threadId = ThreadId.make("thread:scheduled-run-recovery");
+      const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+        makeTestAdapter({
+          instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+          driver: CLAUDE_DRIVER,
+          capabilities: ClaudeProviderCapabilitiesV2,
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          responseByRunOrdinal: { 2: "Nightly report: nothing new." },
+          capturedTurns,
+        }),
+        makeTestAdapter({
+          instanceId: CODEX_MODEL_SELECTION.instanceId,
+          driver: CODEX_DRIVER,
+          capabilities: CodexProviderCapabilitiesV2,
+          modelSelection: CODEX_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+        }),
+      ]);
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const send = (name: string, modelSelection: ModelSelection, scheduled: boolean) =>
+          orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:scheduled-run-recovery:${name}`),
+            threadId,
+            messageId: MessageId.make(`message:scheduled-run-recovery:${name}`),
+            text: `Prompt ${name}`,
+            attachments: [],
+            modelSelection,
+            dispatchMode: { type: "queue_after_active" },
+            ...(scheduled
+              ? {
+                  scheduledTaskId: ScheduledTaskId.make("scheduled-run-recovery"),
+                  freshContext: true,
+                }
+              : {}),
+          });
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:scheduled-run-recovery:create"),
+          threadId,
+          projectId: ProjectId.make("project:scheduled-run-recovery"),
+          title: "User chat with a schedule before a switch",
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: cwd,
+        });
+        for (const [name, selection, scheduled] of [
+          ["user-first", CLAUDE_MODEL_SELECTION, false],
+          ["nightly-report", CLAUDE_MODEL_SELECTION, true],
+          ["user-codex", CODEX_MODEL_SELECTION, false],
+          ["user-back", CLAUDE_MODEL_SELECTION, false],
+        ] as const) {
+          yield* send(name, selection, scheduled);
+          yield* worker.drain();
+          yield* waitForIdle(threadId);
+        }
+        const turns = yield* Ref.get(capturedTurns);
+        const turnFor = (name: string) =>
+          turns.find((turn) => turn.text.endsWith(`Prompt ${name}`))!;
+        assert.notEqual(turnFor("user-back").nativeThreadId, turnFor("user-first").nativeThreadId);
+        // The fresh session gets the user's conversation, not the schedule's side conversation.
+        const fresh = turnFor("user-back").text;
+        assert.include(fresh, "Prompt user-first");
+        assert.include(fresh, "Prompt user-codex");
+        assert.notInclude(fresh, "Prompt nightly-report");
+        assert.notInclude(fresh, "Nightly report: nothing new.");
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: "scheduled-run-recovery",
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            layerRegistry,
+          ),
+        ),
+      );
+    }),
+  );
+
   it.effect.each([
     "same-provider-retry",
     "cancelled-dropped",

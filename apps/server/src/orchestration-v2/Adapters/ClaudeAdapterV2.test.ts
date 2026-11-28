@@ -2306,6 +2306,73 @@ describe("ClaudeAdapterV2 resumeThread", () => {
       ),
     ),
   );
+
+  it.effect("fails resume for a session that ran when no projects dir exists", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        // A HOME with no .claude/projects at all, as after the whole dir is removed.
+        const home = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-no-projects-",
+        });
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: { HOME: home },
+          attachmentsDir: home,
+          fileSystem,
+          path,
+          random: yield* SecureRandom.SecureRandom,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-no-projects"),
+            open: () => Effect.die("unused"),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            subagentModel: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        }).pipe(Effect.provideService(HostProcess.HomeDirectory, home));
+        const threadId = ThreadId.make("thread-claude-no-projects");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-no-projects"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const error = yield* Effect.flip(
+          runtime.resumeThread({
+            providerThread: {
+              ...providerThread,
+              firstRunOrdinal: 1,
+              lastRunOrdinal: 3,
+              nativeThreadRef: {
+                driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+                nativeId: "native-thread-no-projects",
+                strength: "strong",
+              },
+            },
+          }),
+        );
+        assert.equal(error._tag, "ProviderAdapterResumeThreadError");
+      }),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
 });
 
 describe("ClaudeAdapterV2 resume compaction", () => {

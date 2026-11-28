@@ -381,16 +381,18 @@ export const otherProviderRanSince = (
       answeredRunIds.has(candidate.id),
   );
   if (latestOther === undefined) return false;
-  // A restarted attempt already delivered the handoff into this native session. Only this
-  // thread's history counts: a fork's or side chat's ordinals number another thread's runs.
+  // A restarted attempt already delivered a handoff into this native session after the other
+  // provider answered. Covered ordinals may number another thread's runs (fork, merge-back,
+  // side chat), so compare the run on this thread the handoff was delivered for.
+  const ordinalByRunId = new Map(
+    projection.runs.map((candidate) => [candidate.id, candidate.ordinal] as const),
+  );
   return !projection.contextHandoffs.some(
     (handoff) =>
-      handoff.strategy !== "fork_delta_summary" &&
-      handoff.strategy !== "manual_context" &&
       handoff.toProviderThreadId === providerThread.id &&
       handoff.delivery?.nativeThreadId === nativeId &&
       handoff.delivery.status !== "pending" &&
-      handoff.coveredRunOrdinals.to >= latestOther.ordinal,
+      (ordinalByRunId.get(handoff.targetRunId) ?? 0) > latestOther.ordinal,
   );
 };
 
@@ -1624,6 +1626,12 @@ export const layer: Layer.Layer<
           const history = yield* projectionStore.getTurnStartHistory(input.threadId);
           const boundary = contextBoundaryOrdinal({ runs: projection.runs, turnItems: history });
           const from = Math.max(1, boundary);
+          // A schedule's fresh run is a side conversation, not this one's history.
+          const scheduledRunIds = new Set(
+            projection.runs
+              .filter((source) => isScheduledFreshRun(source, history))
+              .map((source) => source.id),
+          );
           const handoff = yield* contextHandoffService.prepareProviderHandoff({
             threadId: projection.thread.id,
             targetRunId: run.id,
@@ -1650,7 +1658,8 @@ export const layer: Layer.Layer<
                         source.id === item.runId &&
                         source.ordinal >= boundary &&
                         source.ordinal < run.ordinal &&
-                        source.status !== "rolled_back",
+                        source.status !== "rolled_back" &&
+                        !scheduledRunIds.has(source.id),
                     ),
               ),
             ],
@@ -1669,29 +1678,37 @@ export const layer: Layer.Layer<
           .map((transfer) => transfer.id),
       );
       const withRecoveryHandoff = (handoff: OrchestrationV2ContextHandoff) => {
-        // The summary reads only this thread's items, so a merge-back the old session took
-        // reaches the fresh one only when it is delivered again.
-        const settledMergeBacks = projection.contextHandoffs.filter(
-          (candidate) =>
-            candidate.status === "ready" &&
-            candidate.transferId != null &&
-            mergeBackTransferIds.has(candidate.transferId) &&
-            (candidate.delivery?.status === "injected" ||
-              candidate.delivery?.status === "inline") &&
-            !effectiveHandoffs.some((pending) => pending.id === candidate.id) &&
-            projection.runs.some(
-              (source) =>
-                source.id === candidate.targetRunId &&
-                source.ordinal >= handoff.coveredRunOrdinals.from &&
-                source.ordinal < run.ordinal &&
-                source.status !== "rolled_back",
-            ),
-        );
+        // The summary reads only this thread's items, so a merge-back or a side chat's opening
+        // context the old session took reaches the fresh one only when it is delivered again.
+        // A replay that stopped before the new session accepted it leaves its delivery pending,
+        // so any recorded delivery counts. The covered range applies the fresh-context boundary.
+        const runOrdinal = (runId: RunId) =>
+          projection.runs.find(
+            (source) =>
+              source.id === runId &&
+              source.ordinal >= handoff.coveredRunOrdinals.from &&
+              source.ordinal < run.ordinal &&
+              source.status !== "rolled_back",
+          )?.ordinal;
+        const settledThreadContext = projection.contextHandoffs
+          .filter(
+            (candidate) =>
+              candidate.status === "ready" &&
+              candidate.delivery !== undefined &&
+              ((candidate.transferId != null && mergeBackTransferIds.has(candidate.transferId)) ||
+                isSideChatHandoff(candidate)) &&
+              !effectiveHandoffs.some((pending) => pending.id === candidate.id) &&
+              runOrdinal(candidate.targetRunId) !== undefined,
+          )
+          .toSorted(
+            (left, right) =>
+              (runOrdinal(left.targetRunId) ?? 0) - (runOrdinal(right.targetRunId) ?? 0),
+          );
         // Delivery ranks later handoffs as newer history. Pending handoffs from
         // earlier runs predate this summary; handoffs for this run (provider-switch
         // delta, merge-back) are newer and must stay last.
         return [
-          ...settledMergeBacks,
+          ...settledThreadContext,
           ...effectiveHandoffs.filter((candidate) => candidate.targetRunId !== run.id),
           handoff,
           ...effectiveHandoffs.filter((candidate) => candidate.targetRunId === run.id),
@@ -2093,25 +2110,36 @@ export const layer: Layer.Layer<
         // A slash command defers history, so a fresh session would leave it nothing to act on.
         // A provider that hands back its loaded session cannot replace it, so it keeps resuming.
         // The turn-start read holds only this run's prompt; a schedule's runs are told by theirs.
-        const earlierFreshRunIds = projection.runs
-          .filter((candidate) => candidate.freshContext === true && candidate.id !== run.id)
-          .map((candidate) => candidate.id);
-        const returningFromOtherProvider =
+        const mayReplaceSession =
           !slashCommand &&
-          session.providerSession.capabilities.threads.canReplaceNativeThread === true &&
+          session.providerSession.capabilities.threads.canReplaceNativeThread === true;
+        const otherFreshRunIds = mayReplaceSession
+          ? projection.runs
+              .filter(
+                (candidate) =>
+                  candidate.freshContext === true &&
+                  candidate.ordinal < run.ordinal &&
+                  candidate.providerInstanceId !== providerThread.providerInstanceId &&
+                  candidate.status !== "failed" &&
+                  candidate.status !== "rolled_back",
+              )
+              .map((candidate) => candidate.id)
+          : [];
+        // The lookup is optional: an unreadable prompt keeps resuming rather than failing the turn.
+        const otherFreshRunPrompts =
+          otherFreshRunIds.length === 0
+            ? Option.some([])
+            : yield* projectionStore.getTurnStartHistory(input.threadId, otherFreshRunIds).pipe(
+                Effect.map((items) => items.filter((item) => item.type === "user_message")),
+                Effect.option,
+              );
+        const returningFromOtherProvider =
+          mayReplaceSession &&
+          Option.isSome(otherFreshRunPrompts) &&
           otherProviderRanSince(
             {
               ...projection,
-              turnItems:
-                earlierFreshRunIds.length === 0
-                  ? projection.turnItems
-                  : [
-                      ...projection.turnItems,
-                      ...(yield* projectionStore.getTurnStartHistory(
-                        input.threadId,
-                        earlierFreshRunIds,
-                      )),
-                    ],
+              turnItems: [...projection.turnItems, ...otherFreshRunPrompts.value],
             },
             providerThread,
             run,

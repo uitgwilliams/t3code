@@ -3770,6 +3770,7 @@ describe("otherProviderRanSince", () => {
         ],
         contextHandoffs: [
           {
+            targetRunId: "run-3",
             toProviderThreadId: claude,
             delivery: { nativeThreadId: "native-claude", status: "injected" },
             coveredRunOrdinals: { from: 1, to: 2 },
@@ -3779,8 +3780,10 @@ describe("otherProviderRanSince", () => {
     ).toBe(false);
   });
 
-  it("ignores a merge-back or side chat whose ordinals number another thread's runs", () => {
-    for (const strategy of ["fork_delta_summary", "manual_context"]) {
+  it("ignores a handoff delivered before the other provider answered", () => {
+    // A portable fork's summary numbers the source thread's runs (here up to 20), and a
+    // merge-back's or side chat's number another thread's; only the run it reached counts.
+    for (const strategy of ["full_thread_summary", "fork_delta_summary", "manual_context"]) {
       expect(
         check({
           runs: returnRuns,
@@ -3791,9 +3794,10 @@ describe("otherProviderRanSince", () => {
           contextHandoffs: [
             {
               strategy,
+              targetRunId: "run-1",
               toProviderThreadId: claude,
               delivery: { nativeThreadId: "native-claude", status: "inline" },
-              coveredRunOrdinals: { from: 1, to: 50 },
+              coveredRunOrdinals: { from: 1, to: 20 },
             },
           ],
         }),

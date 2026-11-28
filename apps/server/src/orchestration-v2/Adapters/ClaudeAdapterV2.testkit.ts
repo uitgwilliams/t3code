@@ -988,6 +988,9 @@ const writeReplayTaskOutputFiles = Effect.fn("ClaudeReplay.writeTaskOutputFiles"
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const tmpRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "claude-replay-tasks-" });
+  // A file in place of the projects dir makes transcript state unknown, so the replay decides resumes.
+  yield* fileSystem.makeDirectory(path.join(tmpRoot, ".claude"));
+  yield* fileSystem.writeFileString(path.join(tmpRoot, ".claude", "projects"), "");
   const frames = transcript.entries.flatMap((entry) =>
     entry.type === "emit_inbound" && typeof entry.frame === "object" && entry.frame !== null
       ? [entry.frame as Record<string, unknown>]
