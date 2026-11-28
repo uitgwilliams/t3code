@@ -10,9 +10,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR or branch cancels the older run. Every job boots
+# its own throwaway VM on the shared bair-ci host, so superseded main pushes
+# would otherwise hold its few slots while every other repo waits.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Skips jobs a pull request cannot affect: a web change does not run the
@@ -392,6 +395,9 @@ jobs:
   # isolation that flag buys is preserved exactly. One file at a time keeps
   # about 1.5 cores busy, so 4 vCPU runners lose nothing against 8. The shards
   # split files by recorded duration (apps/server/src/testUtils/weightedShardSequencer.ts).
+  # Four shards, not eight: bair-ci runs at most two T3 Code VMs at a time, so
+  # eight shards ran in four waves anyway and paid each VM boot, checkout and
+  # install twice as often. release.yml keeps upstream's eight hosted shards.
   # The shards are the longest jobs, so they gate themselves instead of waiting
   # ~15s for `changes`: a shard the change cannot affect stops after checkout.
   test_server:
@@ -400,13 +406,14 @@ jobs:
       id-token: write
     name: Test Server ${{ matrix.shard }}
     runs-on: [self-hosted, linux, bair-h1]
-    # Shards take 2-5 minutes. When the shared task cache throttles reads, each
-    # failed fetch stalls vp for 15-90s, which pushed shards past 10 minutes.
+    # Eight shards took 2-5 minutes each; four take roughly twice as long. When
+    # the shared task cache throttles reads, each failed fetch stalls vp for
+    # 15-90s, which pushed eight-way shards past 10 minutes.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     steps:
       # Depth 2 brings the base commit the change is diffed against.
       - name: Checkout
