@@ -1071,6 +1071,23 @@ describe("unseen completion with background work", () => {
     expect(isSidebarThreadWorking(thread)).toBe(expected.receded);
     expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: expected.pill });
   });
+
+  it.each([
+    { status: "preparing", isUnread: false, isWoke: false, receded: false },
+    { status: "working", isUnread: false, isWoke: false, receded: false },
+    { status: "ready", isUnread: true, isWoke: false, receded: false },
+    { status: "ready", isUnread: false, isWoke: true, receded: false },
+    { status: "ready", isUnread: false, isWoke: false, receded: true },
+    { status: "approval", isUnread: true, isWoke: false, receded: false },
+    { status: "approval", isUnread: false, isWoke: false, receded: true },
+  ] as const)(
+    "recedes an unselected $status thread (unread $isUnread, woke $isWoke): $receded",
+    ({ receded, ...input }) => {
+      expect(shouldRecedeSidebarThread({ ...input, isActive: false, isSelected: false })).toBe(
+        receded,
+      );
+    },
+  );
 });
 
 describe("Working shelf (beta)", () => {

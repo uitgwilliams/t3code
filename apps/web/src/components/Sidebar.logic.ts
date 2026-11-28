@@ -942,7 +942,7 @@ export function shouldRecedeSidebarThread(input: {
   ) {
     return false;
   }
-  if (input.status === "preparing" || input.status === "working" || input.status === "waiting") {
+  if (input.status === "waiting") {
     return true;
   }
   if (input.status === "ready" || input.status === "approval") {
