@@ -318,6 +318,8 @@ export const OrchestrationV2ThreadCapabilities = Schema.Struct({
   canForkWhileSourceRunning: Schema.optional(Schema.Boolean),
   canForkFromSubagentThread: Schema.Boolean,
   exposesNativeThreadId: Schema.Boolean,
+  // Opens a new native session in the same provider session on request, instead of returning the loaded one.
+  canReplaceNativeThread: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2ThreadCapabilities = typeof OrchestrationV2ThreadCapabilities.Type;
 

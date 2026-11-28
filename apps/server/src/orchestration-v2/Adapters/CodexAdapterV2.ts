@@ -368,6 +368,7 @@ export const CodexProviderCapabilitiesV2 = {
     canForkWhileSourceRunning: true,
     canForkFromSubagentThread: true,
     exposesNativeThreadId: true,
+    canReplaceNativeThread: true,
   },
   turns: {
     exposesNativeTurnId: true,

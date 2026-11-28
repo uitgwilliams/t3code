@@ -988,6 +988,9 @@ const writeReplayTaskOutputFiles = Effect.fn("ClaudeReplay.writeTaskOutputFiles"
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const tmpRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "claude-replay-tasks-" });
+  // A file in place of the projects dir makes transcript state unknown, so the replay decides resumes.
+  yield* fileSystem.makeDirectory(path.join(tmpRoot, ".claude"));
+  yield* fileSystem.writeFileString(path.join(tmpRoot, ".claude", "projects"), "");
   const frames = transcript.entries.flatMap((entry) =>
     entry.type === "emit_inbound" && typeof entry.frame === "object" && entry.frame !== null
       ? [entry.frame as Record<string, unknown>]
@@ -1047,12 +1050,20 @@ function layerClaudeProviderAdapterRegistryReplay(
             {
               instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
               displayName: undefined,
-              environment: [{ name: "CLAUDE_CODE_TMPDIR", value: tmpRoot, sensitive: false }],
+              environment: [
+                { name: "CLAUDE_CODE_TMPDIR", value: tmpRoot, sensitive: false },
+                // Transcript checks follow the CLI's HOME, so keep it off the developer's ~/.claude.
+                { name: "HOME", value: tmpRoot, sensitive: false },
+              ],
               enabled: true,
               config: DEFAULT_CLAUDE_SETTINGS,
             },
             {},
-          ).pipe(Effect.map((adapter) => [adapter])),
+          ).pipe(
+            Effect.map((adapter) => [adapter]),
+            // Replays must match on every machine, whatever the developer's ~/.claude holds.
+            Effect.provideService(HostProcess.HomeDirectory, tmpRoot),
+          ),
         ),
       ),
       Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),

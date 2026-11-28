@@ -4,7 +4,7 @@ import {
 } from "@t3tools/shared/assistantCitations";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
@@ -3683,3 +3683,150 @@ effectIt.effect("rejects citation expansion before opening a provider session", 
     expect(harness.projection().messages[0]?.text).toBe(text);
   }),
 );
+
+describe("otherProviderRanSince", () => {
+  const claude = "provider-thread:claude";
+  const codex = "provider-thread:codex";
+  const run = (ordinal: number, providerThreadId: string, status = "completed") => ({
+    id: `run-${ordinal}`,
+    ordinal,
+    providerThreadId,
+    providerInstanceId: providerThreadId === claude ? "claude" : "codex",
+    status,
+    startedAt: "started",
+  });
+  const answered = (ordinal: number, providerThreadId: string) => ({
+    attempt: { id: `attempt-${ordinal}`, runId: `run-${ordinal}` },
+    turn: { providerThreadId, runAttemptId: `attempt-${ordinal}`, startedAt: "started" },
+  });
+  const check = (input: {
+    readonly runs: ReadonlyArray<ReturnType<typeof run>>;
+    readonly answeredRuns: ReadonlyArray<readonly [number, string]>;
+    readonly historyOrigin?: string;
+    readonly contextHandoffs?: ReadonlyArray<unknown>;
+    readonly turnItems?: ReadonlyArray<unknown>;
+  }) => {
+    const turns = input.answeredRuns.map(([ordinal, thread]) => answered(ordinal, thread));
+    return ProviderTurnStart.otherProviderRanSince(
+      {
+        thread: { historyOrigin: input.historyOrigin ?? "native" },
+        runs: input.runs,
+        attempts: turns.map(({ attempt }) => attempt),
+        providerTurns: turns.map(({ turn }) => turn),
+        contextHandoffs: input.contextHandoffs ?? [],
+        turnItems: input.turnItems ?? [],
+      } as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[0],
+      {
+        id: claude,
+        providerInstanceId: "claude",
+        nativeThreadRef: { nativeId: "native-claude" },
+      } as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[1],
+      run(3, claude) as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[2],
+    );
+  };
+  const returnRuns = [run(1, claude), run(2, codex), run(3, claude, "starting")];
+
+  it("starts fresh after another provider answered", () => {
+    expect(
+      check({
+        runs: returnRuns,
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps the native session when the other provider refused or failed the turn", () => {
+    expect(check({ runs: returnRuns, answeredRuns: [[1, claude]] })).toBe(false);
+    expect(
+      check({
+        runs: [run(1, claude), run(2, codex, "failed"), run(3, claude, "starting")],
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      check({
+        runs: [run(1, claude), run(2, codex, "rolled_back"), run(3, claude, "starting")],
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the session a restarted attempt already received the handoff in", () => {
+    expect(
+      check({
+        runs: returnRuns,
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+        contextHandoffs: [
+          {
+            targetRunId: "run-3",
+            toProviderThreadId: claude,
+            delivery: { nativeThreadId: "native-claude", status: "injected" },
+            coveredRunOrdinals: { from: 1, to: 2 },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("ignores a handoff delivered before the other provider answered", () => {
+    // A portable fork's summary numbers the source thread's runs (here up to 20), and a
+    // merge-back's or side chat's number another thread's; only the run it reached counts.
+    for (const strategy of ["full_thread_summary", "fork_delta_summary", "manual_context"]) {
+      expect(
+        check({
+          runs: returnRuns,
+          answeredRuns: [
+            [1, claude],
+            [2, codex],
+          ],
+          contextHandoffs: [
+            {
+              strategy,
+              targetRunId: "run-1",
+              toProviderThreadId: claude,
+              delivery: { nativeThreadId: "native-claude", status: "inline" },
+              coveredRunOrdinals: { from: 1, to: 20 },
+            },
+          ],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("does not count a schedule's fresh run on another provider", () => {
+    const scheduled = { ...run(2, codex), freshContext: true, userMessageId: "message-2" };
+    const prompt = (scheduledTaskId?: string) => ({
+      type: "user_message",
+      runId: "run-2",
+      messageId: "message-2",
+      ordinal: 1,
+      ...(scheduledTaskId === undefined ? {} : { scheduledTaskId }),
+    });
+    const runs = [run(1, claude), scheduled, run(3, claude, "starting")];
+    const answeredRuns = [
+      [1, claude],
+      [2, codex],
+    ] as const;
+    expect(check({ runs, answeredRuns, turnItems: [prompt("task")] })).toBe(false);
+    // A user's fresh-context run is still a turn of the conversation.
+    expect(check({ runs, answeredRuns, turnItems: [prompt()] })).toBe(true);
+  });
+
+  it("starts an imported session fresh once another provider answered first", () => {
+    const runs = [run(1, codex), run(3, claude, "starting")];
+    expect(check({ runs, answeredRuns: [[1, codex]], historyOrigin: "v1_import" })).toBe(true);
+    expect(check({ runs, answeredRuns: [[1, codex]] })).toBe(false);
+  });
+});
