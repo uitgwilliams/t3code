@@ -669,6 +669,7 @@ export const ClaudeProviderCapabilitiesV2 = {
     canForkWhileSourceRunning: true,
     canForkFromSubagentThread: false,
     exposesNativeThreadId: true,
+    canReplaceNativeThread: true,
   },
   turns: {
     exposesNativeTurnId: false,

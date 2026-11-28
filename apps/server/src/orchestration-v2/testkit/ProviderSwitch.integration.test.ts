@@ -618,6 +618,7 @@ describe("orchestration v2 provider switching", () => {
     "screenshot-fallback",
     "screenshot-reported-capacity-native",
     "screenshot-option-change-retry-native",
+    "screenshot-option-change-retry-retained-native",
     "screenshot-exhausted-target-native",
     "screenshot-exhausted-target-fallback",
     "screenshot-exhausted-target-estimate-native",
@@ -647,6 +648,8 @@ describe("orchestration v2 provider switching", () => {
       const priorImages = scenario.includes("prior-images");
       const exhaustedTarget = scenario.includes("exhausted-target");
       const replaceNative = scenario.includes("replacement");
+      // Like Muse: the provider cannot open a new session in place, so a return resumes it.
+      const retainedNative = scenario.includes("retained");
       const capacityScenario = modelScenario || scenario.includes("reported-capacity");
       const returning =
         scenario === "large-current-input" ||
@@ -675,7 +678,15 @@ describe("orchestration v2 provider switching", () => {
         makeTestAdapter({
           instanceId: CLAUDE_MODEL_SELECTION.instanceId,
           driver: CLAUDE_DRIVER,
-          capabilities: ClaudeProviderCapabilitiesV2,
+          capabilities: retainedNative
+            ? {
+                ...ClaudeProviderCapabilitiesV2,
+                threads: {
+                  ...ClaudeProviderCapabilitiesV2.threads,
+                  canReplaceNativeThread: false,
+                },
+              }
+            : ClaudeProviderCapabilitiesV2,
           modelSelection: CLAUDE_MODEL_SELECTION,
           responseByRunOrdinal: scenario.includes("target-estimate")
             ? { 2: "x".repeat(64_000) }
@@ -946,6 +957,9 @@ describe("orchestration v2 provider switching", () => {
           )!.contextUsage;
           if (reasoningScenario || scenario.includes("turn-usage")) {
             assert.deepEqual(failedUsage, { usedTokens: 37_321, maxTokens: 258_400 });
+          } else if (retainedNative) {
+            // The resumed session keeps the usage it reported.
+            assert.deepEqual(failedUsage, { usedTokens: 30_000, maxTokens: 1_000_000 });
           } else {
             // Returning after Codex answered starts a fresh session, which has no usage until a turn runs.
             assert.isNull(failedUsage);
@@ -1520,7 +1534,7 @@ describe("orchestration v2 provider switching", () => {
           driver: CODEX_DRIVER,
           capabilities: CodexProviderCapabilitiesV2,
           modelSelection: CODEX_MODEL_SELECTION,
-          responseByRunOrdinal: {},
+          responseByRunOrdinal: { 1: "Codex says the code word is PELICAN." },
           capturedTurns,
           failedRunOrdinals: new Set(scenario === "after-answered-switch" ? [] : [1]),
         }),
@@ -1679,6 +1693,7 @@ describe("orchestration v2 provider switching", () => {
           // Codex answered after the import, so Claude starts fresh from a handoff that carries both.
           assert.notEqual(claudeTurn?.nativeThreadId, "native-session");
           assert.include(claudeTurn?.text ?? "", "Remember the code word PELICAN.");
+          assert.include(claudeTurn?.text ?? "", "Codex says the code word is PELICAN.");
           return;
         }
         if (scenario === "resume-fails") {
@@ -2171,6 +2186,70 @@ describe("orchestration v2 provider switching", () => {
         transfer.targetRunId === runId && transfer.id.includes("provider_resume_fallback"),
     ),
   ];
+
+  it.live("keeps resuming a provider that cannot replace its session when it returns", () =>
+    Effect.gen(function* () {
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      yield* unverifiedReplacementHarness(
+        "unverified-replacement-return",
+        [
+          makeTestAdapter({
+            instanceId: CODEX_MODEL_SELECTION.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: CODEX_MODEL_SELECTION,
+            responseByRunOrdinal: { 2: "Codex answered." },
+            capturedTurns,
+          }),
+          // Like Muse: a forced new thread hands back the loaded one, and it says so.
+          makeTestAdapter({
+            instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+            driver: CLAUDE_DRIVER,
+            capabilities: {
+              ...ClaudeProviderCapabilitiesV2,
+              threads: {
+                ...ClaudeProviderCapabilitiesV2.threads,
+                canReplaceNativeThread: false,
+              },
+            },
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            responseByRunOrdinal: {},
+            capturedTurns,
+            reusesNativeThread: true,
+          }),
+        ],
+        ({ orchestrator, dispatchRequest, awaitSettled }) =>
+          Effect.gen(function* () {
+            yield* dispatchRequest(1, CLAUDE_MODEL_SELECTION);
+            yield* awaitSettled(1);
+            const nativeId = (yield* orchestrator.getThreadProjection(threadId)).providerThreads[0]!
+              .nativeThreadRef?.nativeId;
+            yield* dispatchRequest(2, CODEX_MODEL_SELECTION);
+            yield* awaitSettled(2);
+            yield* dispatchRequest(3, CLAUDE_MODEL_SELECTION);
+            yield* awaitSettled(3);
+
+            const projection = yield* orchestrator.getThreadProjection(threadId);
+            const run3 = projection.runs.at(-1)!;
+            assert.equal(run3.status, "completed");
+            assert.deepEqual(replacementRecordsFor(projection, run3.id), []);
+            const claude = projection.providerThreads.find(
+              (thread) => thread.driver === CLAUDE_DRIVER,
+            );
+            assert.isDefined(nativeId);
+            assert.equal(claude?.nativeThreadRef?.nativeId, nativeId);
+            const turns = yield* Ref.get(capturedTurns);
+            assert.deepEqual(
+              turns.map((turn) => turn.driver),
+              [CLAUDE_DRIVER, CODEX_DRIVER, CLAUDE_DRIVER],
+            );
+            // The resumed session gets only what it missed.
+            assert.include(turns[2]!.text, "Codex answered.");
+            assert.notInclude(turns[2]!.text, "Request 1");
+          }),
+      );
+    }),
+  );
 
   it.live("fails honestly when the provider reuses its session for a context handoff", () =>
     Effect.gen(function* () {
@@ -5408,6 +5487,101 @@ describe("orchestration v2 provider switching", () => {
       }),
   );
 
+  it.live("resumes the user's session after a scheduled fresh run on another provider", () =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace("scheduled-other-provider");
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+        makeTestAdapter({
+          instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+          driver: CLAUDE_DRIVER,
+          capabilities: ClaudeProviderCapabilitiesV2,
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+        }),
+        makeTestAdapter({
+          instanceId: CODEX_MODEL_SELECTION.instanceId,
+          driver: CODEX_DRIVER,
+          capabilities: CodexProviderCapabilitiesV2,
+          modelSelection: CODEX_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+        }),
+      ]);
+      const threadId = ThreadId.make("thread:scheduled-other-provider");
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const send = (name: string, modelSelection: ModelSelection, scheduled: boolean) =>
+          orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:scheduled-other-provider:${name}`),
+            threadId,
+            messageId: MessageId.make(`message:scheduled-other-provider:${name}`),
+            text: name,
+            attachments: [],
+            modelSelection,
+            dispatchMode: { type: "queue_after_active" },
+            ...(scheduled
+              ? {
+                  scheduledTaskId: ScheduledTaskId.make("scheduled-other-provider"),
+                  freshContext: true,
+                }
+              : {}),
+          });
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:scheduled-other-provider:create"),
+          threadId,
+          projectId: ProjectId.make("project:scheduled-other-provider"),
+          title: "User chat with a fresh-session schedule on another provider",
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: cwd,
+        });
+        for (const [name, selection, scheduled] of [
+          ["user-first", CLAUDE_MODEL_SELECTION, false],
+          ["scheduled", CODEX_MODEL_SELECTION, true],
+          ["user-second", CLAUDE_MODEL_SELECTION, false],
+        ] as const) {
+          yield* send(name, selection, scheduled);
+          yield* worker.drain();
+          yield* waitForIdle(threadId);
+        }
+        const turns = yield* Ref.get(capturedTurns);
+        const turnFor = (name: string) => turns.find((turn) => turn.text.endsWith(name))!;
+        assert.equal(turnFor("scheduled").driver, CODEX_DRIVER);
+        // A schedule's fresh run is a side conversation, so the user's session carries on.
+        assert.equal(turnFor("user-second").nativeThreadId, turnFor("user-first").nativeThreadId);
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: "scheduled-other-provider",
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            layerRegistry,
+          ),
+        ),
+      );
+    }),
+  );
+
   it.live("keeps the user's conversation after a scheduled fresh run in the same thread", () =>
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace("scheduled-fresh-user-chat");
@@ -6739,6 +6913,139 @@ describe("orchestration v2 provider switching", () => {
           ),
         );
       }),
+  );
+
+  it.live("carries a merge-back the old session took into a fresh session after a switch", () =>
+    Effect.gen(function* () {
+      const cwd = yield* checkpointWorkspace("merge-back-fresh-session");
+      const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+      const sourceThreadId = ThreadId.make("thread:merge-back-fresh-session:source");
+      const forkThreadId = ThreadId.make("thread:merge-back-fresh-session:fork");
+      const marker = "The merge marker is cobalt.";
+      const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
+        makeTestAdapter({
+          instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+          driver: CLAUDE_DRIVER,
+          capabilities: ClaudeProviderCapabilitiesV2,
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          capturedTurns,
+        }),
+        makeTestAdapter({
+          instanceId: CODEX_MODEL_SELECTION.instanceId,
+          driver: CODEX_DRIVER,
+          capabilities: CodexProviderCapabilitiesV2,
+          modelSelection: CODEX_MODEL_SELECTION,
+          responseByRunOrdinal: {},
+          responseByThreadId: { [forkThreadId]: { 1: marker, 2: marker, 3: marker } },
+          capturedTurns,
+        }),
+      ]);
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const send = (threadId: ThreadId, name: string, modelSelection: ModelSelection) =>
+          orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:merge-back-fresh-session:${name}`),
+            threadId,
+            messageId: MessageId.make(`message:merge-back-fresh-session:${name}`),
+            text: `Prompt ${name}`,
+            attachments: [],
+            modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          });
+        const settle = (threadId: ThreadId) =>
+          worker.drain().pipe(
+            Effect.andThen(waitForIdle(threadId)),
+            Effect.tap(() => worker.drain()),
+          );
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:merge-back-fresh-session:create"),
+          threadId: sourceThreadId,
+          projectId,
+          title: "Merge-back fresh session",
+          modelSelection: CLAUDE_MODEL_SELECTION,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+        yield* send(sourceThreadId, "source", CLAUDE_MODEL_SELECTION);
+        const source = yield* settle(sourceThreadId);
+        yield* orchestrator.dispatch({
+          type: "thread.fork",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:merge-back-fresh-session:fork"),
+          sourceThreadId,
+          targetThreadId: forkThreadId,
+          sourcePoint: { type: "run", runId: source.runs[0]!.id },
+          title: "Fork",
+        });
+        // The fork answers on another provider, so it resolves through portable context.
+        yield* send(forkThreadId, "fork-codex", CODEX_MODEL_SELECTION);
+        yield* settle(forkThreadId);
+        const fork = yield* orchestrator.getThreadProjection(forkThreadId);
+        yield* orchestrator.dispatch({
+          type: "thread.merge_back",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:merge-back-fresh-session:merge"),
+          sourceThreadId: forkThreadId,
+          targetThreadId: sourceThreadId,
+          sourcePoint: { type: "run", runId: fork.runs.at(-1)!.id },
+        });
+        // The original session takes the merge-back, then another provider answers.
+        yield* send(sourceThreadId, "consume", CLAUDE_MODEL_SELECTION);
+        const consumed = yield* settle(sourceThreadId);
+        const oldNativeId = consumed.providerThreads.find(
+          (thread) => thread.driver === CLAUDE_DRIVER,
+        )?.nativeThreadRef?.nativeId;
+        yield* send(sourceThreadId, "codex", CODEX_MODEL_SELECTION);
+        yield* settle(sourceThreadId);
+        yield* send(sourceThreadId, "claude-again", CLAUDE_MODEL_SELECTION);
+        const returned = yield* settle(sourceThreadId);
+
+        const turns = yield* Ref.get(capturedTurns);
+        const turnFor = (name: string) =>
+          turns.find((turn) => turn.text.endsWith(`Prompt ${name}`))!.text;
+        assert.include(turnFor("consume"), marker);
+        const newNativeId = returned.providerThreads.find(
+          (thread) => thread.driver === CLAUDE_DRIVER,
+        )?.nativeThreadRef?.nativeId;
+        assert.isDefined(oldNativeId);
+        assert.notEqual(newNativeId, oldNativeId);
+        // The merged fork's answer lives only in the merge-back, so the fresh session needs it again.
+        const fresh = turnFor("claude-again");
+        assert.include(fresh, marker);
+        assert.include(fresh, "Prompt codex");
+        assert.include(fresh, "Prompt source");
+      }).pipe(
+        Effect.provide(
+          ProviderReplayHarness.layerWithRegistry(
+            {
+              name: "merge-back-fresh-session",
+              runtimePolicyOverride: {
+                cwd,
+                approvalPolicy: "never",
+                sandboxPolicy: {
+                  type: "readOnly",
+                  access: { type: "fullAccess" },
+                  networkAccess: false,
+                },
+              },
+            },
+            layerRegistry,
+          ),
+        ),
+      );
+    }),
   );
 
   it.effect.each([

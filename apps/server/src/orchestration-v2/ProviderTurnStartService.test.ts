@@ -3704,6 +3704,7 @@ describe("otherProviderRanSince", () => {
     readonly answeredRuns: ReadonlyArray<readonly [number, string]>;
     readonly historyOrigin?: string;
     readonly contextHandoffs?: ReadonlyArray<unknown>;
+    readonly turnItems?: ReadonlyArray<unknown>;
   }) => {
     const turns = input.answeredRuns.map(([ordinal, thread]) => answered(ordinal, thread));
     return ProviderTurnStart.otherProviderRanSince(
@@ -3713,6 +3714,7 @@ describe("otherProviderRanSince", () => {
         attempts: turns.map(({ attempt }) => attempt),
         providerTurns: turns.map(({ turn }) => turn),
         contextHandoffs: input.contextHandoffs ?? [],
+        turnItems: input.turnItems ?? [],
       } as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[0],
       {
         id: claude,
@@ -3775,6 +3777,47 @@ describe("otherProviderRanSince", () => {
         ],
       }),
     ).toBe(false);
+  });
+
+  it("ignores a merge-back or side chat whose ordinals number another thread's runs", () => {
+    for (const strategy of ["fork_delta_summary", "manual_context"]) {
+      expect(
+        check({
+          runs: returnRuns,
+          answeredRuns: [
+            [1, claude],
+            [2, codex],
+          ],
+          contextHandoffs: [
+            {
+              strategy,
+              toProviderThreadId: claude,
+              delivery: { nativeThreadId: "native-claude", status: "inline" },
+              coveredRunOrdinals: { from: 1, to: 50 },
+            },
+          ],
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("does not count a schedule's fresh run on another provider", () => {
+    const scheduled = { ...run(2, codex), freshContext: true, userMessageId: "message-2" };
+    const prompt = (scheduledTaskId?: string) => ({
+      type: "user_message",
+      runId: "run-2",
+      messageId: "message-2",
+      ordinal: 1,
+      ...(scheduledTaskId === undefined ? {} : { scheduledTaskId }),
+    });
+    const runs = [run(1, claude), scheduled, run(3, claude, "starting")];
+    const answeredRuns = [
+      [1, claude],
+      [2, codex],
+    ] as const;
+    expect(check({ runs, answeredRuns, turnItems: [prompt("task")] })).toBe(false);
+    // A user's fresh-context run is still a turn of the conversation.
+    expect(check({ runs, answeredRuns, turnItems: [prompt()] })).toBe(true);
   });
 
   it("starts an imported session fresh once another provider answered first", () => {

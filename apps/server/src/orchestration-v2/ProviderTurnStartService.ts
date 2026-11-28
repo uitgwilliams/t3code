@@ -343,7 +343,7 @@ const nativeSessionMissesKeptTurns = (
 export const otherProviderRanSince = (
   projection: Pick<
     OrchestrationV2ThreadProjection,
-    "thread" | "runs" | "attempts" | "providerTurns" | "contextHandoffs"
+    "thread" | "runs" | "attempts" | "providerTurns" | "contextHandoffs" | "turnItems"
   >,
   providerThread: OrchestrationV2ProviderThread,
   run: OrchestrationV2Run,
@@ -376,12 +376,17 @@ export const otherProviderRanSince = (
       candidate.providerInstanceId !== providerThread.providerInstanceId &&
       // A failed run keeps the native session: its delta is small and nothing settled.
       candidate.status !== "failed" &&
+      // A schedule's fresh run is a side conversation, not a turn of the user's conversation.
+      !isScheduledFreshRun(candidate, projection.turnItems) &&
       answeredRunIds.has(candidate.id),
   );
   if (latestOther === undefined) return false;
-  // A restarted attempt already delivered the handoff into this native session.
+  // A restarted attempt already delivered the handoff into this native session. Only this
+  // thread's history counts: a fork's or side chat's ordinals number another thread's runs.
   return !projection.contextHandoffs.some(
     (handoff) =>
+      handoff.strategy !== "fork_delta_summary" &&
+      handoff.strategy !== "manual_context" &&
       handoff.toProviderThreadId === providerThread.id &&
       handoff.delivery?.nativeThreadId === nativeId &&
       handoff.delivery.status !== "pending" &&
@@ -1655,11 +1660,38 @@ export const layer: Layer.Layer<
         },
       );
       const recoveryHandoff = yield* Effect.cached(prepareRecoveryHandoff());
+      const mergeBackTransferIds = new Set(
+        projection.contextTransfers
+          .filter(
+            (transfer) =>
+              transfer.type === "merge_back" && transfer.targetThreadId === projection.thread.id,
+          )
+          .map((transfer) => transfer.id),
+      );
       const withRecoveryHandoff = (handoff: OrchestrationV2ContextHandoff) => {
+        // The summary reads only this thread's items, so a merge-back the old session took
+        // reaches the fresh one only when it is delivered again.
+        const settledMergeBacks = projection.contextHandoffs.filter(
+          (candidate) =>
+            candidate.status === "ready" &&
+            candidate.transferId != null &&
+            mergeBackTransferIds.has(candidate.transferId) &&
+            (candidate.delivery?.status === "injected" ||
+              candidate.delivery?.status === "inline") &&
+            !effectiveHandoffs.some((pending) => pending.id === candidate.id) &&
+            projection.runs.some(
+              (source) =>
+                source.id === candidate.targetRunId &&
+                source.ordinal >= handoff.coveredRunOrdinals.from &&
+                source.ordinal < run.ordinal &&
+                source.status !== "rolled_back",
+            ),
+        );
         // Delivery ranks later handoffs as newer history. Pending handoffs from
         // earlier runs predate this summary; handoffs for this run (provider-switch
         // delta, merge-back) are newer and must stay last.
         return [
+          ...settledMergeBacks,
           ...effectiveHandoffs.filter((candidate) => candidate.targetRunId !== run.id),
           handoff,
           ...effectiveHandoffs.filter((candidate) => candidate.targetRunId === run.id),
@@ -2059,8 +2091,31 @@ export const layer: Layer.Layer<
           );
         // Returning from another provider prefers a fresh session from the handoff over the stale native one.
         // A slash command defers history, so a fresh session would leave it nothing to act on.
+        // A provider that hands back its loaded session cannot replace it, so it keeps resuming.
+        // The turn-start read holds only this run's prompt; a schedule's runs are told by theirs.
+        const earlierFreshRunIds = projection.runs
+          .filter((candidate) => candidate.freshContext === true && candidate.id !== run.id)
+          .map((candidate) => candidate.id);
         const returningFromOtherProvider =
-          !slashCommand && otherProviderRanSince(projection, providerThread, run);
+          !slashCommand &&
+          session.providerSession.capabilities.threads.canReplaceNativeThread === true &&
+          otherProviderRanSince(
+            {
+              ...projection,
+              turnItems:
+                earlierFreshRunIds.length === 0
+                  ? projection.turnItems
+                  : [
+                      ...projection.turnItems,
+                      ...(yield* projectionStore.getTurnStartHistory(
+                        input.threadId,
+                        earlierFreshRunIds,
+                      )),
+                    ],
+            },
+            providerThread,
+            run,
+          );
         const resumed = yield* Effect.result(
           uncertainDelivery || nativeSessionLacksKeptTurns || rejectedHistory
             ? Effect.fail(
