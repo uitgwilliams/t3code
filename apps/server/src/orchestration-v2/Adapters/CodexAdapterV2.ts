@@ -7784,6 +7784,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const withLoadedThread = <A, E, R>(
           providerThread: OrchestrationV2ProviderThread,
           threadId: string,
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
           request: Effect.Effect<A, E, R>,
         ) =>
           request.pipe(
@@ -7793,8 +7794,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   resumeNativeThread(threadId, {
                     threadId: providerThread.appThreadId,
                     mcpSession,
-                    modelSelection: input.modelSelection,
-                    runtimePolicy: input.runtimePolicy,
+                    ...(runtimePolicy === undefined ? {} : { runtimePolicy }),
                   }),
                 ),
                 Effect.andThen(request),
@@ -7808,6 +7808,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const response = yield* withLoadedThread(
                 toolsInput.providerThread,
                 threadId,
+                toolsInput.runtimePolicy,
                 ensureInitialized.pipe(
                   Effect.andThen(
                     client.request("mcpServerStatus/list", {
@@ -7829,6 +7830,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const response = yield* withLoadedThread(
                 callInput.providerThread,
                 threadId,
+                callInput.runtimePolicy,
                 ensureInitialized.pipe(
                   Effect.andThen(
                     client.request("mcpServer/tool/call", {
@@ -7857,6 +7859,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const response = yield* withLoadedThread(
                 readInput.providerThread,
                 threadId,
+                readInput.runtimePolicy,
                 ensureInitialized.pipe(
                   Effect.andThen(
                     client.request("mcpServer/resource/read", {
@@ -8837,8 +8840,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 yield* resumeNativeThread(threadId, {
                   threadId: threadInput.providerThread.appThreadId,
                   mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
-                  modelSelection: input.modelSelection,
-                  runtimePolicy: input.runtimePolicy,
+                  ...(threadInput.runtimePolicy === undefined
+                    ? {}
+                    : { runtimePolicy: threadInput.runtimePolicy }),
                 });
               }
               const response = yield* ensureInitialized.pipe(
