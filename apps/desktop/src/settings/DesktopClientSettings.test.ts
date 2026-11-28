@@ -114,6 +114,14 @@ const withClientSettings = <A, E, R>(
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("DesktopClientSettings", () => {
+  it.effect("defaults omitted glass opacity to 95 percent", () =>
+    Effect.gen(function* () {
+      const { glassOpacity: _glassOpacity, ...savedSettings } = clientSettings;
+      const decoded = yield* decodeClientSettingsJson(JSON.stringify(savedSettings));
+      assert.equal(decoded.glassOpacity, 95);
+    }),
+  );
+
   it.effect("saves through a symlinked client settings file without replacing the link", () =>
     withClientSettings(
       Effect.gen(function* () {

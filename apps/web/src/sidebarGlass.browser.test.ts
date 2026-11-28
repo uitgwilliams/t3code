@@ -8,7 +8,10 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
   const workspace = document.createElement("div");
   workspace.innerHTML = `
     <div data-app-sidebar>
-      <div data-slot="sidebar-inner" class="sidebar-glass"><span>Threads</span></div>
+      <div data-slot="sidebar-inner" class="sidebar-glass">
+        <div class="sidebar-stage-backdrop"></div>
+        <span>Threads</span>
+      </div>
     </div>
     <main data-slot="sidebar-inset" class="bg-background surface-grain"></main>
     <div class="sidebar-glass" data-auxiliary-sidebar></div>
@@ -16,11 +19,13 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
   document.body.append(workspace);
   const appSidebar = workspace.querySelector<HTMLElement>("[data-app-sidebar]")!;
   const sidebar = workspace.querySelector('[data-slot="sidebar-inner"]')!;
+  const backdrop = workspace.querySelector(".sidebar-stage-backdrop")!;
   const inset = workspace.querySelector("main")!;
   const auxiliarySidebar = workspace.querySelector("[data-auxiliary-sidebar]")!;
   const styles = [root, document.body].map((element) => [element, element.style.cssText] as const);
   const solidCanvas = "rgb(250, 250, 250)";
-  const solidSidebar = "rgb(51, 51, 51)";
+  const customSidebar = "rgba(51, 51, 51, 0.5)";
+  const solidSidebar = "color(srgb 0.2 0.2 0.2)";
   const transparent = "rgba(0, 0, 0, 0)";
   const session = cdp();
   const setTransparency = (value: string) =>
@@ -30,34 +35,50 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
 
   try {
     await setTransparency("no-preference");
-    root.style.setProperty("--sidebar", solidSidebar);
-    appSidebar.style.setProperty("--sidebar", solidSidebar);
+    root.style.setProperty("--sidebar", customSidebar);
+    appSidebar.style.setProperty("--sidebar", customSidebar);
     root.style.setProperty("--app-chrome-background", solidCanvas);
     for (const [element] of styles) element.style.backgroundColor = solidCanvas;
 
     expect(getComputedStyle(sidebar).backgroundColor).toBe(solidSidebar);
     expect(getComputedStyle(root).backgroundColor).toBe(solidCanvas);
 
+    inset.remove();
     root.dataset.desktopGlass = "macos";
+    expect(getComputedStyle(root).backgroundColor).toBe(solidCanvas);
+    expect(getComputedStyle(document.body).backgroundColor).toBe(solidCanvas);
+
+    workspace.append(inset);
+    root.style.setProperty("--app-chrome-background", "rgba(250, 250, 250, 0.5)");
     expect(getComputedStyle(root).backgroundColor).toBe(transparent);
     expect(getComputedStyle(document.body).backgroundColor).toBe(transparent);
     expect(getComputedStyle(document.body).backgroundImage).toBe("none");
-    expect(getComputedStyle(inset).backgroundColor).toBe(solidCanvas);
-    expect(getComputedStyle(inset).backgroundImage).not.toBe("none");
+    expect(getComputedStyle(inset).backgroundColor).toBe("rgb(255, 255, 255)");
+    expect(getComputedStyle(inset).backgroundImage).toContain(
+      "linear-gradient(rgba(250, 250, 250, 0.5), rgba(250, 250, 250, 0.5))",
+    );
+    root.style.colorScheme = "dark";
+    expect(getComputedStyle(inset).backgroundColor).toBe("rgb(0, 0, 0)");
     expect(getComputedStyle(auxiliarySidebar).backgroundColor).toBe(solidSidebar);
     expect(getComputedStyle(sidebar).backgroundImage).toBe("none");
     expect(getComputedStyle(sidebar).opacity).toBe("1");
     expect(getComputedStyle(sidebar).backgroundColor).toBe("color(srgb 0.2 0.2 0.2 / 0.95)");
+
+    expect(getComputedStyle(backdrop).opacity).toBe("0.95");
+    expect(getComputedStyle(backdrop, "::after").display).toBe("none");
 
     for (const opacity of [40, 100]) {
       root.style.setProperty("--glass-opacity", `${opacity}%`);
       expect(getComputedStyle(sidebar).backgroundColor).toBe(
         opacity === 100 ? "color(srgb 0.2 0.2 0.2)" : "color(srgb 0.2 0.2 0.2 / 0.4)",
       );
+      expect(getComputedStyle(backdrop).opacity).toBe(String(opacity / 100));
     }
 
     root.style.setProperty("--glass-opacity", "40%");
     await setTransparency("reduce");
+    expect(getComputedStyle(backdrop).opacity).toBe("1");
+    expect(getComputedStyle(backdrop, "::after").display).toBe("block");
     expect(getComputedStyle(sidebar).backgroundColor).toBe(solidSidebar);
     expect(getComputedStyle(root).backgroundColor).toBe(solidCanvas);
     expect(getComputedStyle(document.body).backgroundColor).toBe(solidCanvas);

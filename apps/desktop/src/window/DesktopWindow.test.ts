@@ -210,11 +210,12 @@ const layerElectronMenu = Layer.succeed(ElectronMenu.ElectronMenu, {
   showContextMenu: () => Effect.succeedNone,
 } satisfies ElectronMenu.ElectronMenu["Service"]);
 
-const layerElectronTheme = Layer.succeed(ElectronTheme.ElectronTheme, {
-  shouldUseDarkColors: Effect.succeed(false),
-  setSource: () => Effect.void,
-  onUpdated: () => Effect.void,
-} satisfies ElectronTheme.ElectronTheme["Service"]);
+const layerElectronTheme = (shouldUseDarkColors = Effect.succeed(false)) =>
+  Layer.succeed(ElectronTheme.ElectronTheme, {
+    shouldUseDarkColors,
+    setSource: () => Effect.void,
+    onUpdated: () => Effect.void,
+  } satisfies ElectronTheme.ElectronTheme["Service"]);
 
 const layerDesktopEnvironmentFor = (platform: NodeJS.Platform) =>
   DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
@@ -236,6 +237,7 @@ const desktopWindowBoundsEquivalence = Schema.toEquivalence(
 );
 
 function layerTest(input: {
+  shouldUseDarkColors?: Effect.Effect<boolean>;
   readonly window: Electron.BrowserWindow;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
@@ -364,7 +366,7 @@ function layerTest(input: {
           openSystemSettings: () => Effect.succeed(true),
           copyText: input.onCopyText ?? (() => Effect.void),
         } satisfies ElectronShell.ElectronShell["Service"]),
-        layerElectronTheme,
+        layerElectronTheme(input.shouldUseDarkColors),
         layerElectronWindow,
         Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, {
           enabled: input.primaryPasteEnabled ?? true,
@@ -482,7 +484,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
             openSystemSettings: () => Effect.succeed(true),
             copyText: () => Effect.void,
           } satisfies ElectronShell.ElectronShell["Service"]),
-          layerElectronTheme,
+          layerElectronTheme(),
           Layer.succeed(ElectronWindow.ElectronWindow, electronWindowShape),
           Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, { enabled: true }),
           Layer.mock(PreviewPasskeys.PreviewPasskeys)({
@@ -1354,12 +1356,14 @@ describe("DesktopWindow", () => {
       Effect.gen(function* () {
         const main = makeFakeBrowserWindow();
         const auxiliary = makeFakeBrowserWindow();
+        const dark = yield* Ref.make(false);
         const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
         const layer = layerTest({
           window: main.window,
           createCount: yield* Ref.make(0),
           mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
           platform,
+          shouldUseDarkColors: Ref.get(dark),
           createdWindowOptions,
           appearanceWindows: [
             { window: main.window, titleBarOverlay: platform !== "darwin" },
@@ -1370,6 +1374,8 @@ describe("DesktopWindow", () => {
         yield* Effect.gen(function* () {
           const desktopWindow = yield* DesktopWindow.DesktopWindow;
           yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+          yield* desktopWindow.syncAppearance;
+          yield* Ref.set(dark, true);
           yield* desktopWindow.syncAppearance;
         }).pipe(Effect.provide(layer));
 
@@ -1384,8 +1390,14 @@ describe("DesktopWindow", () => {
           createdWindowOptions[0]?.visualEffectState,
           platform === "darwin" ? "active" : undefined,
         );
-        assert.deepEqual(vi.mocked(main.window.setBackgroundColor).mock.calls, [[backgroundColor]]);
-        assert.deepEqual(vi.mocked(auxiliary.window.setBackgroundColor).mock.calls, [["#ffffff"]]);
+        assert.deepEqual(vi.mocked(main.window.setBackgroundColor).mock.calls, [
+          [backgroundColor],
+          [platform === "darwin" ? "#00000000" : "#000000"],
+        ]);
+        assert.deepEqual(vi.mocked(auxiliary.window.setBackgroundColor).mock.calls, [
+          ["#ffffff"],
+          ["#000000"],
+        ]);
       }),
   );
 

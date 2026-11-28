@@ -400,10 +400,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 @utility sidebar-glass {
   background-color: var(--sidebar);
+  background-color: rgb(from var(--sidebar) r g b / 1);
 
   @media (prefers-reduced-transparency: no-preference) {
     html[data-desktop-glass="macos"] [data-app-sidebar] & {
-      background-color: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
+      background-color: rgb(from var(--sidebar) r g b / var(--glass-opacity));
     }
   }
 }
@@ -566,6 +567,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --stage-fade: var(--sidebar-stage-fade, var(--app-chrome-background));
   mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 92%);
   -webkit-mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 92%);
+
+  @media (prefers-reduced-transparency: no-preference) {
+    html[data-desktop-glass="macos"] [data-app-sidebar] & {
+      opacity: var(--glass-opacity);
+
+      &::after {
+        display: none;
+      }
+    }
+  }
 
   &::after {
     content: "";
@@ -775,7 +786,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   @media (prefers-reduced-transparency: no-preference) {
     /* Boot and standalone routes still need their canvas behind the page. */
-    html[data-desktop-glass="macos"]:has([data-app-sidebar] [data-slot="sidebar-inner"]) {
+    html[data-desktop-glass="macos"]:has([data-app-sidebar] [data-slot="sidebar-inner"]):has(
+        [data-slot="sidebar-inset"]
+      ) {
       &,
       & body {
         background-color: transparent !important;
@@ -787,7 +800,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 @media (prefers-reduced-transparency: no-preference) {
   html[data-desktop-glass="macos"] [data-slot="sidebar-inset"] {
-    background-color: var(--app-chrome-background);
+    background-color: light-dark(#ffffff, #000000);
+    background-image:
+      var(--surface-grain),
+      linear-gradient(var(--app-chrome-background), var(--app-chrome-background));
+    background-size:
+      var(--surface-grain-size),
+      100% 100%;
   }
 }
 
