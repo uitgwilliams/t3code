@@ -62,18 +62,18 @@ it("saves the reordered usage counters and still opens Usage on click", async ()
   );
 
   const codex = screen.getByRole("button", { name: /Codex.*Weekly.*68% remaining/ });
+  // dnd-kit swallows clicks for 50 ms after a pointer drag, so click before dragging.
+  await codex.click();
+  expect(onClick).toHaveBeenCalledOnce();
+
   codex.element().focus();
   await userEvent.keyboard(" ");
   await userEvent.keyboard("{ArrowRight}");
   await userEvent.keyboard(" ");
   await expect.element(screen.getByRole("button").first()).toHaveTextContent("41%");
-  expect(onClick).not.toHaveBeenCalled();
 
   const claude = screen.getByRole("button", { name: /Claude.*Weekly.*41% remaining/ });
   await userEvent.dragAndDrop(claude, codex, { steps: 12 });
   await expect.element(screen.getByRole("button").first()).toHaveTextContent("68%");
-  expect(onClick).not.toHaveBeenCalled();
-
-  await codex.click();
   expect(onClick).toHaveBeenCalledOnce();
 });
