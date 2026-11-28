@@ -806,10 +806,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   html[data-desktop-glass="macos"] [data-slot="sidebar-inset"] {
     background-color: light-dark(#ffffff, #000000);
     background-image:
-      var(--surface-grain),
+      var(--surface-grain), linear-gradient(var(--background), var(--background)),
       linear-gradient(var(--app-chrome-background), var(--app-chrome-background));
     background-size:
       var(--surface-grain-size),
+      100% 100%,
       100% 100%;
   }
 }

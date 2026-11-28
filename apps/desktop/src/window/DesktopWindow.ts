@@ -1319,16 +1319,13 @@ export const make = Effect.gen(function* () {
     }),
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
-      const mainWindow = yield* electronWindow.main;
-      yield* electronWindow.syncAllAppearance((window, { titleBarOverlay }) =>
+      yield* electronWindow.syncAllAppearance((window, { titleBarOverlay, nativeGlass }) =>
         syncWindowAppearance(
           window,
           titleBarOverlay,
           shouldUseDarkColors,
           environment.platform,
-          environment.platform === "darwin" &&
-            Option.isSome(mainWindow) &&
-            mainWindow.value === window,
+          environment.platform === "darwin" && nativeGlass,
         ),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),

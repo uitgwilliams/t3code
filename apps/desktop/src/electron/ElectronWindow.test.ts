@@ -195,6 +195,31 @@ describe("ElectronWindow", () => {
     }).pipe(Effect.provide(layerTestFor("win32"))),
   );
 
+  it.effect("reports native glass as soon as a window is constructed", () =>
+    Effect.gen(function* () {
+      const glass = { isDestroyed: () => false };
+      const auxiliary = { isDestroyed: () => false };
+      browserWindowMock
+        .mockImplementationOnce(function GlassWindowMock() {
+          return glass;
+        })
+        .mockImplementationOnce(function AuxiliaryWindowMock() {
+          return auxiliary;
+        });
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      yield* electronWindow.create({ vibrancy: "under-window" });
+      yield* electronWindow.create({}, { auxiliary: true });
+      getAllWindowsMock.mockReturnValue([glass, auxiliary]);
+
+      const seen: boolean[] = [];
+      yield* electronWindow.syncAllAppearance((_window, { nativeGlass }) =>
+        Effect.sync(() => seen.push(nativeGlass)),
+      );
+
+      assert.deepEqual(seen, [true, false]);
+    }).pipe(Effect.provide(layerTestFor("darwin"))),
+  );
+
   it.effect("preserves destroy failures and continues with later windows", () =>
     Effect.gen(function* () {
       const cause = new Error("window destroy failed");

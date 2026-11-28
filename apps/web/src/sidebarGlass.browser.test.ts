@@ -60,7 +60,7 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
     expectOpaqueCanvas();
 
     workspace.append(inset);
-    root.style.setProperty("--app-chrome-background", "rgba(250, 250, 250, 0.5)");
+
     for (const scheme of ["dark", "light"]) {
       root.style.colorScheme = scheme;
       for (const [element] of styles) {
@@ -68,12 +68,25 @@ it("limits macOS glass to the app sidebar and honors reduced transparency", asyn
         expect(getComputedStyle(element).backgroundImage).toBe("none");
       }
     }
-    expect(getComputedStyle(inset).backgroundColor).toBe("rgb(255, 255, 255)");
-    expect(getComputedStyle(inset).backgroundImage).toContain(
-      "linear-gradient(rgba(250, 250, 250, 0.5), rgba(250, 250, 250, 0.5))",
+    root.style.setProperty("--background", "#f8fbff");
+    root.style.setProperty("--app-chrome-background", "#101827");
+    expect(getComputedStyle(inset).backgroundImage).toMatch(
+      /, linear-gradient\(rgb\(248, 251, 255\), rgb\(248, 251, 255\)\), linear-gradient\(rgb\(16, 24, 39\), rgb\(16, 24, 39\)\)$/,
     );
-    root.style.colorScheme = "dark";
-    expect(getComputedStyle(inset).backgroundColor).toBe("rgb(0, 0, 0)");
+    expect(getComputedStyle(inset).backgroundColor).toBe("rgb(255, 255, 255)");
+
+    root.style.setProperty("--background", "rgba(248, 251, 255, 0.5)");
+    root.style.setProperty("--app-chrome-background", "rgba(16, 24, 39, 0.5)");
+    for (const [scheme, backing] of [
+      ["light", "rgb(255, 255, 255)"],
+      ["dark", "rgb(0, 0, 0)"],
+    ] as const) {
+      root.style.colorScheme = scheme;
+      expect(getComputedStyle(inset).backgroundImage).toMatch(
+        /, linear-gradient\(rgba\(248, 251, 255, 0.5\), rgba\(248, 251, 255, 0.5\)\), linear-gradient\(rgba\(16, 24, 39, 0.5\), rgba\(16, 24, 39, 0.5\)\)$/,
+      );
+      expect(getComputedStyle(inset).backgroundColor).toBe(backing);
+    }
     expect(getComputedStyle(auxiliarySidebar).backgroundColor).toBe(solidSidebar);
     expect(getComputedStyle(sidebar).backgroundImage).toBe("none");
     expect(getComputedStyle(sidebar).opacity).toBe("1");
