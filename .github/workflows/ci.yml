@@ -108,6 +108,9 @@ jobs:
 
       # Files/dependencies are repo-wide; export checks cover clean workspaces only.
       - name: Check unused code
+        env:
+          # Oxc raw transfer fails to allocate its buffer on the bair-h1 VM.
+          KNIP_DISABLE_RAW_TRANSFER: "1"
         run: vp run knip:check
 
       - name: Check generated GitHub GraphQL operations
