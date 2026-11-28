@@ -800,7 +800,8 @@ export const layer: Layer.Layer<
           handoff.delivery === undefined &&
           isPendingForRun(handoff, true),
       );
-      const sideChatHandoff = run.freshContext === true ? undefined : carriedSideChatHandoffs[0];
+      // A fresh session that replaces the native one gets the side chat context again (see withRecoveryHandoff).
+      let sideChatHandoff = run.freshContext === true ? undefined : carriedSideChatHandoffs[0];
       const nativeForkTransfer = projection.contextTransfers.find(
         (transfer) =>
           transfer.type === "fork" &&
@@ -1677,11 +1678,11 @@ export const layer: Layer.Layer<
           )
           .map((transfer) => transfer.id),
       );
-      const withRecoveryHandoff = (handoff: OrchestrationV2ContextHandoff) => {
-        // The summary reads only this thread's items, so a merge-back or a side chat's opening
-        // context the old session took reaches the fresh one only when it is delivered again.
-        // A replay that stopped before the new session accepted it leaves its delivery pending,
-        // so any recorded delivery counts. The covered range applies the fresh-context boundary.
+      // The summary reads only this thread's items, so a merge-back or a side chat's opening
+      // context the old session took reaches the fresh one only when it is delivered again.
+      // A replay that stopped before the new session accepted it leaves its delivery pending,
+      // so any recorded delivery counts. The covered range applies the fresh-context boundary.
+      const settledThreadContext = (handoff: OrchestrationV2ContextHandoff) => {
         const runOrdinal = (runId: RunId) =>
           projection.runs.find(
             (source) =>
@@ -1690,7 +1691,7 @@ export const layer: Layer.Layer<
               source.ordinal < run.ordinal &&
               source.status !== "rolled_back",
           )?.ordinal;
-        const settledThreadContext = projection.contextHandoffs
+        return projection.contextHandoffs
           .filter(
             (candidate) =>
               candidate.status === "ready" &&
@@ -1704,15 +1705,24 @@ export const layer: Layer.Layer<
             (left, right) =>
               (runOrdinal(left.targetRunId) ?? 0) - (runOrdinal(right.targetRunId) ?? 0),
           );
+      };
+      const withRecoveryHandoff = (handoff: OrchestrationV2ContextHandoff) => {
         // Delivery ranks later handoffs as newer history. Pending handoffs from
         // earlier runs predate this summary; handoffs for this run (provider-switch
         // delta, merge-back) are newer and must stay last.
         return [
-          ...settledThreadContext,
+          ...settledThreadContext(handoff).filter((candidate) => !isSideChatHandoff(candidate)),
           ...effectiveHandoffs.filter((candidate) => candidate.targetRunId !== run.id),
           handoff,
           ...effectiveHandoffs.filter((candidate) => candidate.targetRunId === run.id),
         ];
+      };
+      // Side chat context goes in the prompt, outside the history budget, as on the side chat's first turn.
+      const moveToRecoveryHandoff = (handoff: OrchestrationV2ContextHandoff) => {
+        effectiveHandoffs = withRecoveryHandoff(handoff);
+        if (run.freshContext !== true) {
+          sideChatHandoff ??= settledThreadContext(handoff).findLast(isSideChatHandoff);
+        }
       };
       let resumedRetryHandoff: Effect.Success<ReturnType<typeof prepareRetryHandoff>> | undefined;
       let resumedHandoffContext: ReturnType<typeof handoffContextForThread> | undefined;
@@ -2113,11 +2123,21 @@ export const layer: Layer.Layer<
         const mayReplaceSession =
           !slashCommand &&
           session.providerSession.capabilities.threads.canReplaceNativeThread === true;
+        // Only runs since this session's previous run can count (see otherProviderRanSince).
+        const previousRunOrdinal =
+          projection.runs.findLast(
+            (candidate) =>
+              candidate.ordinal < run.ordinal &&
+              candidate.status !== "rolled_back" &&
+              candidate.providerThreadId === providerThread.id &&
+              candidate.startedAt !== null,
+          )?.ordinal ?? 0;
         const otherFreshRunIds = mayReplaceSession
           ? projection.runs
               .filter(
                 (candidate) =>
                   candidate.freshContext === true &&
+                  candidate.ordinal > previousRunOrdinal &&
                   candidate.ordinal < run.ordinal &&
                   candidate.providerInstanceId !== providerThread.providerInstanceId &&
                   candidate.status !== "failed" &&
@@ -2323,7 +2343,7 @@ export const layer: Layer.Layer<
           events: recoveryEventList,
         });
         if (!replacementWrite.committed) return undefined;
-        effectiveHandoffs = withRecoveryHandoff(handoff);
+        moveToRecoveryHandoff(handoff);
         resumeFellBack = true;
         recoveryTurnItem = handoffTurnItem;
         return replacement;
@@ -2780,7 +2800,7 @@ export const layer: Layer.Layer<
           });
           if (!recoveryWrite.committed) return undefined;
           resumeFellBack = true;
-          effectiveHandoffs = withRecoveryHandoff(handoff);
+          moveToRecoveryHandoff(handoff);
           deliveryTarget = {
             providerThread: recoveredThread,
             budget: freshContext.budget,

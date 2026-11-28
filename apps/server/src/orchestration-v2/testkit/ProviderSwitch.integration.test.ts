@@ -7141,9 +7141,11 @@ describe("orchestration v2 provider switching", () => {
         assert.notEqual(newNativeId, oldNativeId);
         // The side chat's opening context reached it only through the handoff the old session took.
         const fresh = turnFor("side-back");
-        assert.include(fresh, sideChatNote);
         assert.include(fresh, "Prompt side-codex");
         assert.include(fresh, "Prompt side-first");
+        // Once, after the recovered history: it rides the prompt, outside the history budget.
+        assert.equal(fresh.split(sideChatNote).length, 2);
+        assert.isAbove(fresh.indexOf(sideChatNote), fresh.lastIndexOf("Prompt side-codex"));
       }).pipe(
         Effect.provide(
           ProviderReplayHarness.layerWithRegistry(
