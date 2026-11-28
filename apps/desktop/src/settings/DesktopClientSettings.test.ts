@@ -38,7 +38,7 @@ const clientSettings: ClientSettings = {
   diffFilesCollapsed: true,
   diffIgnoreWhitespace: true,
   diffLayout: "stacked",
-  environmentIdentificationMode: "artwork",
+  environmentIdentificationMode: "pill",
   favorites: [],
   fontFamilyCode: "",
   fontFamilyComposer: "",
@@ -49,7 +49,7 @@ const clientSettings: ClientSettings = {
   fontSizePrompt: 14,
   fontSizeTerminal: 12,
   fontSmoothing: true,
-  glassOpacity: 90,
+  glassOpacity: 95,
   onboardingCompletedAt: null,
   panelAnimationDurationMs: 0,
   proactivePanelsEnabled: true,
@@ -114,6 +114,23 @@ const withClientSettings = <A, E, R>(
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("DesktopClientSettings", () => {
+  it.effect("defaults omitted environment identification to the version pill", () =>
+    Effect.gen(function* () {
+      const { environmentIdentificationMode: _environmentIdentificationMode, ...savedSettings } =
+        clientSettings;
+      const decoded = yield* decodeClientSettingsJson(JSON.stringify(savedSettings));
+      assert.equal(decoded.environmentIdentificationMode, "pill");
+    }),
+  );
+
+  it.effect("defaults omitted glass opacity to 95 percent", () =>
+    Effect.gen(function* () {
+      const { glassOpacity: _glassOpacity, ...savedSettings } = clientSettings;
+      const decoded = yield* decodeClientSettingsJson(JSON.stringify(savedSettings));
+      assert.equal(decoded.glassOpacity, 95);
+    }),
+  );
+
   it.effect("saves through a symlinked client settings file without replacing the link", () =>
     withClientSettings(
       Effect.gen(function* () {

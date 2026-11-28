@@ -210,11 +210,12 @@ const layerElectronMenu = Layer.succeed(ElectronMenu.ElectronMenu, {
   showContextMenu: () => Effect.succeedNone,
 } satisfies ElectronMenu.ElectronMenu["Service"]);
 
-const layerElectronTheme = Layer.succeed(ElectronTheme.ElectronTheme, {
-  shouldUseDarkColors: Effect.succeed(false),
-  setSource: () => Effect.void,
-  onUpdated: () => Effect.void,
-} satisfies ElectronTheme.ElectronTheme["Service"]);
+const layerElectronTheme = (shouldUseDarkColors = Effect.succeed(false)) =>
+  Layer.succeed(ElectronTheme.ElectronTheme, {
+    shouldUseDarkColors,
+    setSource: () => Effect.void,
+    onUpdated: () => Effect.void,
+  } satisfies ElectronTheme.ElectronTheme["Service"]);
 
 const layerDesktopEnvironmentFor = (platform: NodeJS.Platform) =>
   DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
@@ -236,6 +237,7 @@ const desktopWindowBoundsEquivalence = Schema.toEquivalence(
 );
 
 function layerTest(input: {
+  shouldUseDarkColors?: Effect.Effect<boolean>;
   readonly window: Electron.BrowserWindow;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
@@ -260,6 +262,7 @@ function layerTest(input: {
   readonly appearanceWindows?: ReadonlyArray<{
     readonly window: Electron.BrowserWindow;
     readonly titleBarOverlay: boolean;
+    readonly nativeGlass: boolean;
   }>;
   readonly primaryPasteEnabled?: boolean;
   readonly previewPasskeyBridgeEnabled?: boolean;
@@ -324,10 +327,10 @@ function layerTest(input: {
     destroyAll: input.destroyAll ?? Effect.void,
     syncAllAppearance: (sync) =>
       input.appearanceWindows === undefined
-        ? sync(input.window, { titleBarOverlay: true })
+        ? sync(input.window, { titleBarOverlay: true, nativeGlass: false })
         : Effect.forEach(
             input.appearanceWindows,
-            ({ window, titleBarOverlay }) => sync(window, { titleBarOverlay }),
+            ({ window, ...appearance }) => sync(window, appearance),
             { discard: true },
           ),
   } satisfies ElectronWindow.ElectronWindow["Service"]);
@@ -364,7 +367,7 @@ function layerTest(input: {
           openSystemSettings: () => Effect.succeed(true),
           copyText: input.onCopyText ?? (() => Effect.void),
         } satisfies ElectronShell.ElectronShell["Service"]),
-        layerElectronTheme,
+        layerElectronTheme(input.shouldUseDarkColors),
         layerElectronWindow,
         Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, {
           enabled: input.primaryPasteEnabled ?? true,
@@ -394,6 +397,7 @@ function layerTest(input: {
 const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | null)[]) =>
   Effect.gen(function* () {
     const createdWindows = yield* Ref.make<Electron.BrowserWindow[]>([]);
+    const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
     const createCalls = yield* Ref.make(0);
     const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
     const revealedWindows = yield* Ref.make<Electron.BrowserWindow[]>([]);
@@ -411,8 +415,9 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
     });
 
     const electronWindowShape = {
-      create: () =>
+      create: (options: Electron.BrowserWindowConstructorOptions) =>
         Effect.gen(function* () {
+          createdWindowOptions.push(options);
           const index = yield* Ref.getAndUpdate(createCalls, (count) => count + 1);
           const outcome = createOutcomes[index] ?? null;
           if (outcome === null) {
@@ -428,6 +433,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
                 frame: null,
                 transparent: null,
                 backgroundColor: null,
+                vibrancy: null,
+                visualEffectState: null,
                 webPreferences: {
                   preload: null,
                   partition: null,
@@ -454,7 +461,9 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
       sendAll: () => Effect.void,
       destroyAll: Effect.void,
       syncAllAppearance: (sync) =>
-        fallbackWindow ? sync(fallbackWindow, { titleBarOverlay: true }) : Effect.void,
+        fallbackWindow
+          ? sync(fallbackWindow, { titleBarOverlay: true, nativeGlass: false })
+          : Effect.void,
     } satisfies ElectronWindow.ElectronWindow["Service"];
 
     const layer = DesktopWindow.layer.pipe(
@@ -478,7 +487,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
             openSystemSettings: () => Effect.succeed(true),
             copyText: () => Effect.void,
           } satisfies ElectronShell.ElectronShell["Service"]),
-          layerElectronTheme,
+          layerElectronTheme(),
           Layer.succeed(ElectronWindow.ElectronWindow, electronWindowShape),
           Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, { enabled: true }),
           Layer.mock(PreviewPasskeys.PreviewPasskeys)({
@@ -497,7 +506,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
       Layer.merge(DesktopState.layer),
     );
 
-    return { layer, createCalls, mainWindow, revealedWindows } as const;
+    return { layer, createCalls, createdWindowOptions, mainWindow, revealedWindows } as const;
   });
 
 const captureOne = DesktopSnapShotId.make("11111111-1111-4111-8111-111111111111");
@@ -1344,6 +1353,74 @@ describe("DesktopWindow", () => {
       }),
   );
 
+  it.effect.each(["darwin", "win32", "linux"] as const)(
+    "uses platform-specific backing for the %s main window, including before registration",
+    (platform) =>
+      Effect.gen(function* () {
+        const initial = makeFakeBrowserWindow();
+        const replacement = makeFakeBrowserWindow();
+        const auxiliary = makeFakeBrowserWindow();
+        const dark = yield* Ref.make(false);
+        const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+        const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+        let current = initial;
+        let syncAppearance = Effect.void;
+        const layer = layerTest({
+          get window() {
+            return current.window;
+          },
+          createCount: yield* Ref.make(0),
+          mainWindow,
+          platform,
+          shouldUseDarkColors: Ref.get(dark),
+          createdWindowOptions,
+          setPreviewMainWindow: () => syncAppearance,
+          get appearanceWindows() {
+            return [
+              {
+                window: current.window,
+                titleBarOverlay: platform !== "darwin",
+                nativeGlass: createdWindowOptions.at(-1)?.vibrancy !== undefined,
+              },
+              { window: auxiliary.window, titleBarOverlay: false, nativeGlass: false },
+            ];
+          },
+        });
+
+        yield* Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+          initial.isDestroyed.mockReturnValue(true);
+          initial.windowListeners.get("closed")?.();
+          current = replacement;
+          syncAppearance = Effect.gen(function* () {
+            assert.isTrue(Option.isNone(yield* Ref.get(mainWindow)));
+            yield* desktopWindow.syncAppearance;
+          });
+          yield* desktopWindow.activate;
+          assert.deepEqual(yield* Ref.get(mainWindow), Option.some(replacement.window));
+          yield* Ref.set(dark, true);
+          yield* desktopWindow.syncAppearance;
+        }).pipe(Effect.provide(layer));
+
+        const backgroundColor = platform === "darwin" ? "#00000000" : "#ffffff";
+        assert.lengthOf(createdWindowOptions, 2);
+        for (const options of createdWindowOptions) {
+          assert.equal(options.backgroundColor, backgroundColor);
+          assert.equal(options.vibrancy, platform === "darwin" ? "under-window" : undefined);
+          assert.equal(options.visualEffectState, platform === "darwin" ? "active" : undefined);
+        }
+        assert.deepEqual(vi.mocked(replacement.window.setBackgroundColor).mock.calls, [
+          [backgroundColor],
+          [platform === "darwin" ? "#00000000" : "#000000"],
+        ]);
+        assert.deepEqual(vi.mocked(auxiliary.window.setBackgroundColor).mock.calls, [
+          ["#ffffff"],
+          ["#000000"],
+        ]);
+      }),
+  );
+
   it.effect("updates title bar overlays only on windows created with one", () =>
     Effect.gen(function* () {
       const framed = makeFakeBrowserWindow();
@@ -1357,8 +1434,8 @@ describe("DesktopWindow", () => {
         mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
         platform: "win32",
         appearanceWindows: [
-          { window: framed.window, titleBarOverlay: false },
-          { window: overlay.window, titleBarOverlay: true },
+          { window: framed.window, titleBarOverlay: false, nativeGlass: false },
+          { window: overlay.window, titleBarOverlay: true, nativeGlass: false },
         ],
       });
 
@@ -1745,6 +1822,11 @@ describe("DesktopWindow", () => {
 
           yield* desktopWindow.showConnectingSplash;
           assert.equal(yield* Ref.get(scenario.createCalls), 1);
+          assert.equal(scenario.createdWindowOptions[0]?.backgroundColor, "#ffffff");
+          assert.isUndefined(scenario.createdWindowOptions[0]?.vibrancy);
+          assert.isUndefined(scenario.createdWindowOptions[0]?.webPreferences?.preload);
+          yield* desktopWindow.syncAppearance;
+          assert.deepEqual(vi.mocked(splash.window.setBackgroundColor).mock.calls, [["#ffffff"]]);
           yield* TestClock.adjust("1 second");
           assert.include(splashHtml(), "Connecting to WSL…");
           const initialLoads = splash.loadURL.mock.calls.length;

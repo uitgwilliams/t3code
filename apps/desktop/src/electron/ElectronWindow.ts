@@ -53,6 +53,8 @@ const ElectronWindowCreateOptions = Schema.Struct({
   frame: Schema.NullOr(Schema.Boolean),
   transparent: Schema.NullOr(Schema.Boolean),
   backgroundColor: Schema.NullOr(Schema.String),
+  vibrancy: Schema.NullOr(Schema.String),
+  visualEffectState: Schema.NullOr(Schema.String),
   webPreferences: Schema.Struct({
     preload: Schema.NullOr(Schema.String),
     partition: Schema.NullOr(Schema.String),
@@ -127,7 +129,7 @@ export class ElectronWindow extends Context.Service<
     readonly syncAllAppearance: <E, R>(
       sync: (
         window: Electron.BrowserWindow,
-        appearance: { readonly titleBarOverlay: boolean },
+        appearance: { readonly titleBarOverlay: boolean; readonly nativeGlass: boolean },
       ) => Effect.Effect<void, E, R>,
     ) => Effect.Effect<void, E, R>;
   }
@@ -149,6 +151,7 @@ export const make = Effect.gen(function* () {
   const mainWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const auxiliaryWindows = new WeakSet<Electron.BrowserWindow>();
   const titleBarOverlayWindows = new WeakSet<Electron.BrowserWindow>();
+  const nativeGlassWindows = new WeakSet<Electron.BrowserWindow>();
 
   const listWindows = Effect.try({
     try: () => Electron.BrowserWindow.getAllWindows(),
@@ -230,6 +233,8 @@ export const make = Effect.gen(function* () {
         frame: options.frame ?? null,
         transparent: options.transparent ?? null,
         backgroundColor: options.backgroundColor ?? null,
+        vibrancy: options.vibrancy ?? null,
+        visualEffectState: options.visualEffectState ?? null,
         webPreferences: {
           preload: webPreferences?.preload ?? null,
           partition: webPreferences?.partition ?? null,
@@ -244,6 +249,7 @@ export const make = Effect.gen(function* () {
       return Effect.try({
         try: () => {
           const window = new Electron.BrowserWindow(options);
+          if (options.vibrancy !== undefined) nativeGlassWindows.add(window);
           if (behavior?.auxiliary === true) auxiliaryWindows.add(window);
           if (options.titleBarOverlay !== undefined && options.titleBarOverlay !== false) {
             titleBarOverlayWindows.add(window);
@@ -392,7 +398,7 @@ export const make = Effect.gen(function* () {
     syncAllAppearance: Effect.fn("desktop.electron.window.syncAllAppearance")(function* <E, R>(
       sync: (
         window: Electron.BrowserWindow,
-        appearance: { readonly titleBarOverlay: boolean },
+        appearance: { readonly titleBarOverlay: boolean; readonly nativeGlass: boolean },
       ) => Effect.Effect<void, E, R>,
     ) {
       const windows = yield* listWindows;
@@ -400,7 +406,10 @@ export const make = Effect.gen(function* () {
         if (yield* isWindowDestroyed(window)) {
           continue;
         }
-        yield* sync(window, { titleBarOverlay: titleBarOverlayWindows.has(window) });
+        yield* sync(window, {
+          titleBarOverlay: titleBarOverlayWindows.has(window),
+          nativeGlass: nativeGlassWindows.has(window),
+        });
       }
     }),
   });

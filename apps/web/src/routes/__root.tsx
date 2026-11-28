@@ -39,6 +39,7 @@ import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcome
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { Button } from "../components/ui/button";
+import { SidebarInset } from "../components/ui/sidebar";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
 import { SharedTooltipProvider } from "../components/ui/shared-tooltip";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
@@ -119,8 +120,8 @@ export const Route = createRootRoute({
 
 function RootRouteNotFoundView() {
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
-      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+    <SidebarInset className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+      <div className="m-6 flex max-w-sm flex-col items-center gap-4 text-center">
         <h1 className="text-lg font-medium text-foreground">
           <T>Page not found</T>
         </h1>
@@ -134,7 +135,7 @@ function RootRouteNotFoundView() {
           <T>Go home</T>
         </Button>
       </div>
-    </main>
+    </SidebarInset>
   );
 }
 

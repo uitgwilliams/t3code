@@ -11,6 +11,10 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
+      // Sandboxed preload can run before the document element exists.
+      if (window.desktopBridge?.getClientPlatform?.() === "darwin") {
+        document.documentElement.dataset.desktopGlass = "macos";
+      }
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#000000";

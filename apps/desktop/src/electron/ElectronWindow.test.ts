@@ -148,6 +148,25 @@ describe("ElectronWindow", () => {
     }).pipe(Effect.provide(layerTestFor("win32"))),
   );
 
+  it.effect("forwards macOS vibrancy options and includes them in creation errors", () =>
+    Effect.gen(function* () {
+      const options = {
+        vibrancy: "under-window",
+        visualEffectState: "active",
+        backgroundColor: "#00000000",
+      } satisfies Electron.BrowserWindowConstructorOptions;
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      yield* electronWindow.create(options);
+      assert.deepEqual(browserWindowMock.mock.calls.at(-1), [options]);
+
+      browserWindowMock.mockImplementationOnce(() => {
+        throw new Error("construction failed");
+      });
+      const error = yield* Effect.flip(electronWindow.create(options));
+      assert.include(error.options, options);
+    }).pipe(Effect.provide(layerTestFor("darwin"))),
+  );
+
   it.effect("reports which windows were created with a title bar overlay", () =>
     Effect.gen(function* () {
       const framed = { isDestroyed: () => false };
@@ -174,6 +193,31 @@ describe("ElectronWindow", () => {
 
       assert.deepEqual(seen, [false, true, false]);
     }).pipe(Effect.provide(layerTestFor("win32"))),
+  );
+
+  it.effect("reports native glass as soon as a window is constructed", () =>
+    Effect.gen(function* () {
+      const glass = { isDestroyed: () => false };
+      const auxiliary = { isDestroyed: () => false };
+      browserWindowMock
+        .mockImplementationOnce(function GlassWindowMock() {
+          return glass;
+        })
+        .mockImplementationOnce(function AuxiliaryWindowMock() {
+          return auxiliary;
+        });
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      yield* electronWindow.create({ vibrancy: "under-window" });
+      yield* electronWindow.create({}, { auxiliary: true });
+      getAllWindowsMock.mockReturnValue([glass, auxiliary]);
+
+      const seen: boolean[] = [];
+      yield* electronWindow.syncAllAppearance((_window, { nativeGlass }) =>
+        Effect.sync(() => seen.push(nativeGlass)),
+      );
+
+      assert.deepEqual(seen, [true, false]);
+    }).pipe(Effect.provide(layerTestFor("darwin"))),
   );
 
   it.effect("preserves destroy failures and continues with later windows", () =>
