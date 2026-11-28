@@ -684,6 +684,7 @@ export type ProviderAdapterV2RollbackTarget =
 
 export interface ProviderAdapterV2RollbackThreadInput {
   readonly providerThread: OrchestrationV2ProviderThread;
+  readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
   readonly target: ProviderAdapterV2RollbackTarget;
   readonly providerThreadTurns: ReadonlyArray<OrchestrationV2ProviderTurn>;
 }
@@ -726,16 +727,19 @@ export interface ProviderAdapterV2McpCallToolResult {
 export interface ProviderAdapterV2McpApps {
   readonly listTools: (input: {
     readonly providerThread: OrchestrationV2ProviderThread;
+    readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
     readonly server: string;
   }) => Effect.Effect<ReadonlyArray<ProviderAdapterV2McpTool>, ProviderAdapterV2Error>;
   readonly callTool: (input: {
     readonly providerThread: OrchestrationV2ProviderThread;
+    readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
     readonly server: string;
     readonly tool: string;
     readonly arguments: Record<string, unknown>;
   }) => Effect.Effect<ProviderAdapterV2McpCallToolResult, ProviderAdapterV2Error>;
   readonly readResource: (input: {
     readonly providerThread: OrchestrationV2ProviderThread;
+    readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
     readonly server: string;
     readonly uri: string;
   }) => Effect.Effect<{ readonly contents: ReadonlyArray<unknown> }, ProviderAdapterV2Error>;

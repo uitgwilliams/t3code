@@ -408,6 +408,7 @@ const layerMcpAppRequestsProvided = McpAppRequests.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       McpAppModelContext.layer,
+      layerRuntimePolicyProvided,
       layerOrchestratorProvided,
       layerThreadManagementProvided,
       layerProviderSessionManagerProvided,

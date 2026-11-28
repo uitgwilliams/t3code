@@ -426,6 +426,7 @@ export const layer: Layer.Layer<
           ? { providerThread }
           : yield* session.rollbackThread({
               providerThread,
+              runtimePolicy: resolvedRuntimePolicy,
               target: rollbackTarget,
               providerThreadTurns,
             });
