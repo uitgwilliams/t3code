@@ -4,7 +4,7 @@ import {
 } from "@t3tools/shared/assistantCitations";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
@@ -3683,3 +3683,103 @@ effectIt.effect("rejects citation expansion before opening a provider session", 
     expect(harness.projection().messages[0]?.text).toBe(text);
   }),
 );
+
+describe("otherProviderRanSince", () => {
+  const claude = "provider-thread:claude";
+  const codex = "provider-thread:codex";
+  const run = (ordinal: number, providerThreadId: string, status = "completed") => ({
+    id: `run-${ordinal}`,
+    ordinal,
+    providerThreadId,
+    providerInstanceId: providerThreadId === claude ? "claude" : "codex",
+    status,
+    startedAt: "started",
+  });
+  const answered = (ordinal: number, providerThreadId: string) => ({
+    attempt: { id: `attempt-${ordinal}`, runId: `run-${ordinal}` },
+    turn: { providerThreadId, runAttemptId: `attempt-${ordinal}`, startedAt: "started" },
+  });
+  const check = (input: {
+    readonly runs: ReadonlyArray<ReturnType<typeof run>>;
+    readonly answeredRuns: ReadonlyArray<readonly [number, string]>;
+    readonly historyOrigin?: string;
+    readonly contextHandoffs?: ReadonlyArray<unknown>;
+  }) => {
+    const turns = input.answeredRuns.map(([ordinal, thread]) => answered(ordinal, thread));
+    return ProviderTurnStart.otherProviderRanSince(
+      {
+        thread: { historyOrigin: input.historyOrigin ?? "native" },
+        runs: input.runs,
+        attempts: turns.map(({ attempt }) => attempt),
+        providerTurns: turns.map(({ turn }) => turn),
+        contextHandoffs: input.contextHandoffs ?? [],
+      } as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[0],
+      {
+        id: claude,
+        providerInstanceId: "claude",
+        nativeThreadRef: { nativeId: "native-claude" },
+      } as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[1],
+      run(3, claude) as unknown as Parameters<typeof ProviderTurnStart.otherProviderRanSince>[2],
+    );
+  };
+  const returnRuns = [run(1, claude), run(2, codex), run(3, claude, "starting")];
+
+  it("starts fresh after another provider answered", () => {
+    expect(
+      check({
+        runs: returnRuns,
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps the native session when the other provider refused or failed the turn", () => {
+    expect(check({ runs: returnRuns, answeredRuns: [[1, claude]] })).toBe(false);
+    expect(
+      check({
+        runs: [run(1, claude), run(2, codex, "failed"), run(3, claude, "starting")],
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      check({
+        runs: [run(1, claude), run(2, codex, "rolled_back"), run(3, claude, "starting")],
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the session a restarted attempt already received the handoff in", () => {
+    expect(
+      check({
+        runs: returnRuns,
+        answeredRuns: [
+          [1, claude],
+          [2, codex],
+        ],
+        contextHandoffs: [
+          {
+            toProviderThreadId: claude,
+            delivery: { nativeThreadId: "native-claude", status: "injected" },
+            coveredRunOrdinals: { from: 1, to: 2 },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("starts an imported session fresh once another provider answered first", () => {
+    const runs = [run(1, codex), run(3, claude, "starting")];
+    expect(check({ runs, answeredRuns: [[1, codex]], historyOrigin: "v1_import" })).toBe(true);
+    expect(check({ runs, answeredRuns: [[1, codex]] })).toBe(false);
+  });
+});

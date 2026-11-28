@@ -2190,6 +2190,110 @@ describe("ClaudeAdapterV2 resumeThread", () => {
           }),
         );
         assert.equal(missingImport._tag, "ProviderAdapterResumeThreadError");
+
+        // A session that already ran and whose transcript Claude Code cleaned up cannot resume.
+        const cleanedUp = yield* Effect.flip(
+          runtime.resumeThread({
+            providerThread: {
+              ...providerThread,
+              firstRunOrdinal: 1,
+              lastRunOrdinal: 3,
+              nativeThreadRef: {
+                driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+                nativeId: "native-thread-cleaned-up",
+                strength: "strong",
+              },
+            },
+          }),
+        );
+        assert.equal(cleanedUp._tag, "ProviderAdapterResumeThreadError");
+      }),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect("keeps a transcript under the CLI's HOME or an unreadable project dir resumable", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const serverHome = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-server-home-",
+        });
+        const cliHome = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-cli-home-",
+        });
+        // The server's own projects dir is readable but holds no copy of the session.
+        yield* fileSystem.makeDirectory(path.join(serverHome, ".claude", "projects", "-other"), {
+          recursive: true,
+        });
+        const projectsDir = path.join(cliHome, ".claude", "projects");
+        yield* fileSystem.makeDirectory(path.join(projectsDir, "-workspace"), { recursive: true });
+        yield* fileSystem.writeFileString(
+          path.join(projectsDir, "-workspace", "native-thread-cli-home.jsonl"),
+          `{"type":"user","message":{"role":"user","content":"hello"},"sessionId":"native-thread-cli-home"}\n`,
+        );
+        const lockedDir = path.join(projectsDir, "-locked");
+        yield* fileSystem.makeDirectory(lockedDir);
+        yield* fileSystem.chmod(lockedDir, 0o000);
+        yield* Effect.addFinalizer(() => fileSystem.chmod(lockedDir, 0o700).pipe(Effect.ignore));
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: { HOME: cliHome },
+          attachmentsDir: cliHome,
+          fileSystem,
+          path,
+          random: yield* SecureRandom.SecureRandom,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-cli-home"),
+            open: () => Effect.die("unused"),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            subagentModel: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        }).pipe(Effect.provideService(HostProcess.HomeDirectory, serverHome));
+        const threadId = ThreadId.make("thread-claude-cli-home");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-cli-home"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const resumeRan = (nativeId: string) =>
+          runtime.resumeThread({
+            providerThread: {
+              ...providerThread,
+              firstRunOrdinal: 1,
+              lastRunOrdinal: 3,
+              nativeThreadRef: {
+                driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+                nativeId,
+                strength: "strong",
+              },
+            },
+          });
+
+        const kept = yield* resumeRan("native-thread-cli-home");
+        assert.equal(kept.nativeThreadRef?.nativeId, "native-thread-cli-home");
+        // The locked dir may hold the transcript, so the CLI decides.
+        const unknown = yield* resumeRan("native-thread-maybe-locked");
+        assert.equal(unknown.nativeThreadRef?.nativeId, "native-thread-maybe-locked");
       }),
     ).pipe(
       Effect.provide(

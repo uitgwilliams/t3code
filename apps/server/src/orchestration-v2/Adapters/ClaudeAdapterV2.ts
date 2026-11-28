@@ -6240,6 +6240,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   ).pipe(Effect.provideService(Path.Path, path));
   const hostEnvironment = yield* HostProcess.Environment;
   const hostPlatform = yield* HostProcess.Platform;
+  const hostHomeDirectory = yield* HostProcess.HomeDirectory;
   const customHome =
     adapterOptions.settings.homePath.trim().length > 0 ||
     adapterOptions.environment.CLAUDE_CONFIG_DIR !== hostEnvironment.CLAUDE_CONFIG_DIR;
@@ -13939,12 +13940,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           return false;
         });
 
-        const claudeProjectsDir = Effect.gen(function* () {
+        const claudeProjectsDir = Effect.sync(() => {
           const configuredDir = adapterOptions.environment.CLAUDE_CONFIG_DIR?.trim() ?? "";
           return path.join(
             configuredDir.length > 0
               ? path.resolve(session.cwd, configuredDir)
-              : path.join(yield* HostProcess.HomeDirectory, ".claude"),
+              : // The CLI resolves ~/.claude from the HOME it is launched with.
+                path.join(adapterOptions.environment.HOME?.trim() || hostHomeDirectory, ".claude"),
             "projects",
           );
         });
@@ -15359,12 +15361,25 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           let unreadable = false;
           for (const project of yield* fileSystem.readDirectory(projectsDir)) {
             const transcriptPath = path.join(projectsDir, project, `${nativeThreadId}.jsonl`);
-            // Stray files beside the project dirs fail with ENOTDIR.
-            if (
-              !(yield* fileSystem.exists(transcriptPath).pipe(Effect.orElseSucceed(() => false)))
-            ) {
+            // Only a confirmed missing file counts as absent; any other error leaves the state unknown.
+            const exists = yield* fileSystem.stat(transcriptPath).pipe(
+              Effect.as(true),
+              Effect.catch((error) =>
+                Effect.succeed(
+                  error.reason._tag === "NotFound" ||
+                    // Stray files beside the project dirs fail with ENOTDIR.
+                    (error.reason._tag === "BadResource" &&
+                      (error.reason.cause as NodeJS.ErrnoException | undefined)?.code === "ENOTDIR")
+                    ? false
+                    : undefined,
+                ),
+              ),
+            );
+            if (exists === undefined) {
+              unreadable = true;
               continue;
             }
+            if (!exists) continue;
             const conversationLine = yield* fileSystem
               .stream(transcriptPath)
               .pipe(
@@ -15383,7 +15398,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             }
             found = true;
           }
-          return found && !unreadable ? ("empty" as const) : ("missing" as const);
+          if (unreadable) return "missing" as const;
+          // No copy anywhere: Claude Code cleaned it up (cleanupPeriodDays) or never saved it.
+          return found ? ("empty" as const) : ("absent" as const);
         });
 
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
@@ -15514,11 +15531,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 // Opening a missing imported session would start an empty one under its id.
                 if (
                   transcript === "empty" ||
-                  (transcript === "missing" && threadInput.importedNativeSession === true)
+                  (transcript !== "conversation" && threadInput.importedNativeSession === true)
                 ) {
                   return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                     driver: CLAUDE_PROVIDER,
                     detail: `Claude session ${nativeThreadId} has no conversation to resume.`,
+                  });
+                }
+                // A thread that ran before this run but has no transcript left cannot be resumed by the CLI.
+                const { firstRunOrdinal, lastRunOrdinal } = threadInput.providerThread;
+                if (
+                  transcript === "absent" &&
+                  firstRunOrdinal !== null &&
+                  lastRunOrdinal !== null &&
+                  firstRunOrdinal < lastRunOrdinal
+                ) {
+                  return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: `Claude Code no longer has the transcript for session ${nativeThreadId}.`,
                   });
                 }
                 // A session imported from the terminal has history but no T3

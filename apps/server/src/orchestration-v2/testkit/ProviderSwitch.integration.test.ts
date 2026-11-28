@@ -111,6 +111,8 @@ function makeTestAdapter(input: {
   readonly refusalCause?: unknown;
   readonly failInjectionOnce?: Ref.Ref<boolean>;
   readonly nativeThreadGeneration?: Ref.Ref<number>;
+  /** Like Muse: every ensureThread, even a forced new one, returns the same native id. */
+  readonly reusesNativeThread?: boolean;
   readonly failResume?: boolean;
   readonly failResumeOnce?: Ref.Ref<boolean>;
   /** Like a replacement runtime whose initialize timed out. */
@@ -150,6 +152,7 @@ function makeTestAdapter(input: {
   readonly beforeForcedNativeThread?: Effect.Effect<void>;
   readonly unloadThread?: ProviderAdapter.ProviderAdapterV2SessionRuntime["unloadThread"];
 }): ProviderAdapter.ProviderAdapterV2["Service"] {
+  let forcedNativeThreads = 0;
   return {
     instanceId: input.instanceId,
     driver: input.driver,
@@ -238,9 +241,12 @@ function makeTestAdapter(input: {
                 return yield* unimplemented(input.driver, "initialize timed out");
               const createdAt = yield* DateTime.now;
               const generation =
-                input.nativeThreadGeneration === undefined
-                  ? ""
-                  : `:${yield* Ref.getAndUpdate(input.nativeThreadGeneration, (value) => value + 1)}`;
+                input.nativeThreadGeneration !== undefined
+                  ? `:${yield* Ref.getAndUpdate(input.nativeThreadGeneration, (value) => value + 1)}`
+                  : // Most providers give every fresh session a new id.
+                    threadInput.forceNewNativeThread && input.reusesNativeThread !== true
+                    ? `:fresh-${++forcedNativeThreads}`
+                    : "";
               const nativeThreadId = `${input.driver}:${threadInput.threadId}${generation}`;
               return {
                 id: ProviderThreadId.make(`provider-thread:${nativeThreadId}`),
@@ -941,7 +947,8 @@ describe("orchestration v2 provider switching", () => {
           if (reasoningScenario || scenario.includes("turn-usage")) {
             assert.deepEqual(failedUsage, { usedTokens: 37_321, maxTokens: 258_400 });
           } else {
-            assert.deepEqual(failedUsage, { usedTokens: 30_000, maxTokens: 1_000_000 });
+            // Returning after Codex answered starts a fresh session, which has no usage until a turn runs.
+            assert.isNull(failedUsage);
           }
           if (reasoningScenario) {
             const target = failed.providerThreads.find(
@@ -1078,7 +1085,8 @@ describe("orchestration v2 provider switching", () => {
               (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)?.status,
               "completed",
             );
-            assert.equal(yield* Ref.get(generation), 2);
+            // Returning after another provider answered starts fresh from the handoff.
+            assert.equal(yield* Ref.get(generation), 3);
           }
           return;
         }
@@ -1130,7 +1138,12 @@ describe("orchestration v2 provider switching", () => {
             else assert.deepEqual(target.contextUsage, { usedTokens: 37_321, maxTokens: 258_400 });
             assert.lengthOf((yield* Ref.get(capturedTurns)).at(-1)!.attachments, 2);
           }
-          if (replaceNative) assert.equal(yield* Ref.get(generation), 2);
+          // The legacy scenario returns to Claude once more after Codex, which starts fresh again.
+          if (replaceNative)
+            assert.equal(
+              yield* Ref.get(generation),
+              scenario.includes("legacy-replacement") ? 3 : 2,
+            );
           return;
         }
         const handoff = projection.contextHandoffs.at(-1)!;
@@ -1387,6 +1400,8 @@ describe("orchestration v2 provider switching", () => {
       const cwd = yield* checkpointWorkspace("handoff-estimate-headroom");
       const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
       const generation = yield* Ref.make(0);
+      // Background work pins the native session, so only a delta that fits keeps it on return.
+      const pendingBackgroundWork = yield* Ref.make(false);
       // About 112 KB of ordinary English is about 25k tokens: a quarter of a 128k window.
       const prose = "The quick brown fox jumps over the lazy dog. ".repeat(2_500);
       const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
@@ -1407,6 +1422,7 @@ describe("orchestration v2 provider switching", () => {
           responseByRunOrdinal: { 1: prose },
           capturedTurns,
           nativeThreadGeneration: generation,
+          pendingBackgroundWork,
         }),
       ]);
       yield* Effect.gen(function* () {
@@ -1454,6 +1470,7 @@ describe("orchestration v2 provider switching", () => {
         yield* wait(1);
         yield* dispatch(2, "Continue elsewhere", CODEX_MODEL_SELECTION);
         yield* wait(2);
+        yield* Ref.set(pendingBackgroundWork, true);
         yield* dispatch(3, "Back to the first provider", CLAUDE_MODEL_SELECTION);
         yield* wait(3);
         assert.equal(
@@ -1481,12 +1498,13 @@ describe("orchestration v2 provider switching", () => {
   );
 
   const importedNativeSessionScenario = (
-    scenario: "first-send" | "after-failed-switch" | "resume-fails",
+    scenario: "first-send" | "after-failed-switch" | "after-answered-switch" | "resume-fails",
   ) =>
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace(`imported-native-session-${scenario}`);
       const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
-      const claudeOrdinal = scenario === "after-failed-switch" ? 2 : 1;
+      const switched = scenario === "after-failed-switch" || scenario === "after-answered-switch";
+      const claudeOrdinal = switched ? 2 : 1;
       const layerRegistry = ProviderAdapterRegistry.layerFromAdapters([
         makeTestAdapter({
           instanceId: CLAUDE_MODEL_SELECTION.instanceId,
@@ -1504,7 +1522,7 @@ describe("orchestration v2 provider switching", () => {
           modelSelection: CODEX_MODEL_SELECTION,
           responseByRunOrdinal: {},
           capturedTurns,
-          failedRunOrdinals: new Set([1]),
+          failedRunOrdinals: new Set(scenario === "after-answered-switch" ? [] : [1]),
         }),
       ]);
       yield* Effect.gen(function* () {
@@ -1646,7 +1664,7 @@ describe("orchestration v2 provider switching", () => {
             );
             yield* worker.drain();
           });
-        if (scenario === "after-failed-switch") yield* send(1, CODEX_MODEL_SELECTION);
+        if (switched) yield* send(1, CODEX_MODEL_SELECTION);
         yield* send(claudeOrdinal, CLAUDE_MODEL_SELECTION);
 
         const projection = yield* orchestrator.getThreadProjection(threadId);
@@ -1657,6 +1675,12 @@ describe("orchestration v2 provider switching", () => {
         const importHandoffTargets = projection.contextHandoffs
           .filter((handoff) => handoff.strategy === "manual_context")
           .map((handoff) => handoff.toProviderThreadId);
+        if (scenario === "after-answered-switch") {
+          // Codex answered after the import, so Claude starts fresh from a handoff that carries both.
+          assert.notEqual(claudeTurn?.nativeThreadId, "native-session");
+          assert.include(claudeTurn?.text ?? "", "Remember the code word PELICAN.");
+          return;
+        }
         if (scenario === "resume-fails") {
           // The replacement session is empty, so the recovery summary carries the import.
           assert.notEqual(claudeTurn?.nativeThreadId, "native-session");
@@ -1693,6 +1717,9 @@ describe("orchestration v2 provider switching", () => {
   );
   it.live("returns to an imported native session without resending its history", () =>
     importedNativeSessionScenario("after-failed-switch"),
+  );
+  it.live("starts an imported session fresh when another provider answered since the import", () =>
+    importedNativeSessionScenario("after-answered-switch"),
   );
   it.live("recovers an imported native session's history when its resume fails", () =>
     importedNativeSessionScenario("resume-fails"),
@@ -2159,7 +2186,7 @@ describe("orchestration v2 provider switching", () => {
             responseByRunOrdinal: { 2: `Source work ${"s".repeat(12_000)}` },
             capturedTurns,
           }),
-          // Without a generation every ensureThread returns the same native id, like Muse.
+          // Every ensureThread returns the same native id, like Muse.
           makeTestAdapter({
             instanceId: CLAUDE_MODEL_SELECTION.instanceId,
             driver: CLAUDE_DRIVER,
@@ -2167,6 +2194,7 @@ describe("orchestration v2 provider switching", () => {
             modelSelection: CLAUDE_MODEL_SELECTION,
             responseByRunOrdinal: {},
             capturedTurns,
+            reusesNativeThread: true,
             getModelContextWindow: () => 32_000,
           }),
         ],
@@ -2217,7 +2245,7 @@ describe("orchestration v2 provider switching", () => {
       yield* unverifiedReplacementHarness(
         "unverified-replacement-reused-resume",
         [
-          // Without a generation every ensureThread returns the same native id, like Muse.
+          // Every ensureThread returns the same native id, like Muse.
           makeTestAdapter({
             instanceId: CLAUDE_MODEL_SELECTION.instanceId,
             driver: CLAUDE_DRIVER,
@@ -2225,6 +2253,7 @@ describe("orchestration v2 provider switching", () => {
             modelSelection: CLAUDE_MODEL_SELECTION,
             responseByRunOrdinal: {},
             capturedTurns,
+            reusesNativeThread: true,
             failResumeOnce,
           }),
         ],
@@ -2378,6 +2407,7 @@ describe("orchestration v2 provider switching", () => {
             modelSelection: CLAUDE_MODEL_SELECTION,
             responseByRunOrdinal: {},
             capturedTurns,
+            reusesNativeThread: true,
             failResume: true,
           }),
         ],
@@ -3231,21 +3261,22 @@ describe("orchestration v2 provider switching", () => {
           assert.include(delivered.text, "User message:\nContinue");
           assert.equal(handoff?.delivery?.status, "inline");
         }
-        assert.notInclude(deliveredHistory, "Earlier successful request.");
+        // A returning target starts fresh after an answered run, so its recovered context reaches
+        // back to run 1. A failed run leaves the native session in place.
+        if (returning && status !== "failed")
+          assert.include(deliveredHistory, "Earlier successful request.");
+        else assert.notInclude(deliveredHistory, "Earlier successful request.");
         yield* dispatch("back", "Finish the remaining work", sourceSelection);
         yield* waitForRun(sourceOrdinal + 2, "completed");
+        // Switching back starts a fresh session from the handoff, not the stale native one.
         const back = (yield* Ref.get(capturedTurns)).at(-1)!;
-        if (broken) {
-          const source = (yield* Ref.get(capturedTurns)).find(
-            (turn) => turn.modelSelection.instanceId === sourceSelection.instanceId,
-          )!;
-          assert.notEqual(back.nativeThreadId, source.nativeThreadId);
-          assert.include(back.text, originalPrompt);
-          assert.include(back.text, partialResponse);
-        } else {
-          assert.notInclude(back.text, originalPrompt);
-          assert.notInclude(back.text, partialResponse);
-        }
+        const source = (yield* Ref.get(capturedTurns)).find(
+          (turn) => turn.modelSelection.instanceId === sourceSelection.instanceId,
+        )!;
+        assert.notEqual(back.nativeThreadId, source.nativeThreadId);
+        assert.include(back.text, originalPrompt);
+        assert.include(back.text, partialResponse);
+        assert.include(back.text, "User message:\nFinish the remaining work");
       }).pipe(
         Effect.provide(
           ProviderReplayHarness.layerWithRegistry(
@@ -6684,10 +6715,10 @@ describe("orchestration v2 provider switching", () => {
             positions,
             positions.toSorted((a, b) => a - b),
           );
-          // Claude already saw the inherited rows, so its return only carries the Codex run.
+          // Returning to Claude starts fresh from the handoff, which carries the whole conversation.
           const returned = turnFor("fork-claude-again");
           assert.include(returned, "Prompt fork-codex");
-          assert.notInclude(returned, "Prompt source");
+          assert.include(returned, "Prompt source");
         }).pipe(
           Effect.provide(
             ProviderReplayHarness.layerWithRegistry(
