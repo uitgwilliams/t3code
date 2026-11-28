@@ -7514,9 +7514,24 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         // one it is still unloading after thread/unsubscribe until it emits thread/closed.
         const resumeNativeThread = Effect.fn("CodexAdapterV2.resumeNativeThread")(function* (
           threadId: string,
-          params: Record<string, unknown>,
+          runtime: Parameters<typeof codexThreadRuntimeParams>[0],
         ) {
-          const resume = client.raw.request("thread/resume", { threadId, ...params });
+          const { runtimePolicy } = runtime;
+          const sandboxPolicy =
+            runtimePolicy?.sandboxPolicy === undefined
+              ? runtimePolicy === undefined
+                ? undefined
+                : codexRuntimeModeTurnDefaults(runtimePolicy.runtimeMode).sandboxPolicy
+              : yield* decodeTurnSandboxPolicy(runtimePolicy.sandboxPolicy);
+          const resume = client.raw.request("thread/resume", {
+            threadId,
+            excludeTurns: true,
+            // Codex loads workspace instructions before turn/start sets the sandbox.
+            ...(sandboxPolicy?.type === "dangerFullAccess"
+              ? { sandbox: "danger-full-access" as const }
+              : {}),
+            ...codexThreadRuntimeParams(runtime),
+          });
           return yield* resume.pipe(
             Effect.catchTags({
               CodexAppServerRequestError: (cause) => {
@@ -7776,13 +7791,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               readMcpSession(providerThread.appThreadId).pipe(
                 Effect.flatMap((mcpSession) =>
                   resumeNativeThread(threadId, {
-                    excludeTurns: true,
-                    ...codexThreadRuntimeParams({
-                      threadId: providerThread.appThreadId,
-                      mcpSession,
-                      modelSelection: input.modelSelection,
-                      runtimePolicy: input.runtimePolicy,
-                    }),
+                    threadId: providerThread.appThreadId,
+                    mcpSession,
+                    modelSelection: input.modelSelection,
+                    runtimePolicy: input.runtimePolicy,
                   }),
                 ),
                 Effect.andThen(request),
@@ -7984,21 +7996,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
               const appThreadId = threadInput.threadId ?? threadInput.providerThread.appThreadId;
               const resume = resumeNativeThread(nativeThreadId, {
-                excludeTurns: true,
-                // Codex loads workspace instructions during resume, before turn/start sets the sandbox.
-                ...(threadInput.runtimePolicy?.runtimeMode === "full-access"
-                  ? { sandbox: "danger-full-access" }
-                  : {}),
-                ...codexThreadRuntimeParams({
-                  threadId: appThreadId,
-                  mcpSession: yield* readMcpSession(appThreadId),
-                  ...(threadInput.modelSelection === undefined
-                    ? {}
-                    : { modelSelection: threadInput.modelSelection }),
-                  ...(threadInput.runtimePolicy === undefined
-                    ? {}
-                    : { runtimePolicy: threadInput.runtimePolicy }),
-                }),
+                threadId: appThreadId,
+                mcpSession: yield* readMcpSession(appThreadId),
+                ...(threadInput.modelSelection === undefined
+                  ? {}
+                  : { modelSelection: threadInput.modelSelection }),
+                ...(threadInput.runtimePolicy === undefined
+                  ? {}
+                  : { runtimePolicy: threadInput.runtimePolicy }),
               });
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(resume),
@@ -8830,13 +8835,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               // thread/revert requires the thread loaded in this app-server; resume after restart or idle release.
               if (!loaded) {
                 yield* resumeNativeThread(threadId, {
-                  excludeTurns: true,
-                  ...codexThreadRuntimeParams({
-                    threadId: threadInput.providerThread.appThreadId,
-                    mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
-                    modelSelection: input.modelSelection,
-                    runtimePolicy: input.runtimePolicy,
-                  }),
+                  threadId: threadInput.providerThread.appThreadId,
+                  mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
+                  modelSelection: input.modelSelection,
+                  runtimePolicy: input.runtimePolicy,
                 });
               }
               const response = yield* ensureInitialized.pipe(

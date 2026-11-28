@@ -4105,7 +4105,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       yield* harness.runtime.resumeThread({
         providerThread: { ...harness.providerThread, appThreadId: null },
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: { ...CODEX_TEST_RUNTIME_POLICY, runtimeMode: "auto" },
+        runtimePolicy: { ...CODEX_TEST_RUNTIME_POLICY, sandboxPolicy: { type: "readOnly" } },
       });
       const explicitThreadId = ThreadId.make(`thread-${scenario}-explicit`);
       yield* harness.runtime.resumeThread({
@@ -8496,6 +8496,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 params: {
                   threadId: nativeThreadId,
                   excludeTurns: true,
+                  sandbox: "danger-full-access",
                   config: CodexAdapterV2.CODEX_THREAD_CONFIG,
                 },
               },
@@ -10289,6 +10290,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       const resumeParams = {
         threadId: nativeThreadId,
         excludeTurns: true,
+        sandbox: "danger-full-access",
         cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
         model: CODEX_TEST_MODEL_SELECTION.model,
         config: CodexAdapterV2.CODEX_THREAD_CONFIG,
